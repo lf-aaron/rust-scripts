@@ -1,0 +1,11 @@
+[package]
+name = "lut"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+exr = "1.4.2"
+image = "0.24.2"
+itertools = "0.10.3"
