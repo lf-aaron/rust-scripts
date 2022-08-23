@@ -2,5 +2,7 @@
 
 members = [
   "lut",
-  "process-exr"
+  "foreground",
+  "depth",
+  "test"
 ]
