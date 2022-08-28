@@ -5,10 +5,6 @@ use std::io::{BufWriter, Write};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::ops::{Not};
-// use image::codecs::png;
-// use image::codecs::png::{CompressionType, FilterType};
-// use image::ColorType::{Rgba8, Rgb8};
-// use image::ImageEncoder;
 use webp;
 
 
@@ -56,14 +52,15 @@ fn read_depth_exr(path: &Path, v: &mut Vec<f32>) {
     };
 }
 
-fn depth_mask(frame: usize, z_front: &Vec<f32>, z_rear: &Vec<f32>, z_upper: &Vec<f32>, z_plane: &Vec<f32>, dims: &Dim4) -> Vec<u8> {
+fn depth_mask(frame: usize, z_front: &Vec<f32>, z_rear: &Vec<f32>, z_upper: &Vec<f32>, z_plane: &Vec<f32>, size: u64) -> Vec<u8> {
+    let dims = dim4!(size, size);
     let batch = false;
     let mask = constant::<bool>(true, dim4!(3, 3));
     
-    let a_front = Array::new(z_front, *dims);
-    let a_rear = Array::new(z_rear, *dims);
-    let a_upper = Array::new(z_upper, *dims);
-    let a_plane = Array::new(z_plane, *dims);
+    let a_front = Array::new(z_front, dims);
+    let a_rear = Array::new(z_rear, dims);
+    let a_upper = Array::new(z_upper, dims);
+    let a_plane = Array::new(z_plane, dims);
 
     let f_r = lt(&a_front, &a_rear, batch);
     let f_u = lt(&a_front, &a_upper, batch);
@@ -109,11 +106,14 @@ fn depth_mask(frame: usize, z_front: &Vec<f32>, z_rear: &Vec<f32>, z_upper: &Vec
     m_rear = and(&m_rear, &r_p.not(), batch);
 
     let d_front = and(&dilate(&m_front, &mask), &lt(&or(&m_rear, &m_upper, batch), &1, true), batch);
-    let d_rear = and(&dilate(&m_rear, &mask), &lt(&or(&m_front, &m_upper, batch), &1, true), batch);
-    let d_upper = and(&dilate(&m_upper, &mask), &lt(&or(&m_front, &m_rear, batch), &1, true), batch);
+    let mut d_rear = and(&dilate(&m_rear, &mask), &lt(&or(&m_front, &m_upper, batch), &1, true), batch);
+    let mut d_upper = and(&dilate(&m_upper, &mask), &lt(&or(&m_front, &m_rear, batch), &1, true), batch);
+
+    d_upper = and(&d_upper, &d_rear.not(), batch);
+    d_upper = and(&d_upper, &d_front.not(), batch);
+    d_rear = and(&d_rear, &d_front.not(), batch);
 
     let mut buffer = vec!(0; 3 * dims.elements() as usize);
-    // let mut ar = join_many![2; &m_front, &m_rear, &m_upper];
     let mut ar = join_many![2; &d_front, &d_rear, &d_upper];
     ar = reorder_v2(&ar, 2, 0, Some(vec![1]));
     ar.cast::<u8>().host::<u8>(&mut buffer);
@@ -128,22 +128,6 @@ fn save_webp(path: PathBuf, size: u32, pixels: &Vec<u8>) {
     let mut buffered_file_write = BufWriter::new(fs::File::create(path).unwrap());
     buffered_file_write.write_all(&img).unwrap();
 }
-
-// fn save_png(path: PathBuf, size: u32, pixels: &Vec<u8>) {
-//     let buffered_file_write = &mut BufWriter::new(fs::File::create(path).unwrap());
-//     png::PngEncoder::new_with_quality(
-//         buffered_file_write,
-//         CompressionType::Best,
-//         FilterType::NoFilter
-//     )
-//     .write_image(
-//         pixels,
-//         size as u32,
-//         size as u32,
-//         Rgb8
-//     )
-//     .unwrap();
-// }
 
 fn main() {
     let args: CliArgs = CliArgs::parse();
@@ -166,7 +150,6 @@ fn main() {
     if zrear_files.len() != num_frames { panic!("Missing 'Z Rear' files"); }
     if zupper_files.len() != num_frames { panic!("Missing 'Z Upper' files"); }
 
-    let dims = dim4!(size as u64, size as u64);
     let mut z_front = vec![0_f32; size as usize * size as usize];
     let mut z_plane = vec![0_f32; size as usize * size as usize];
     let mut z_rear = vec![0_f32; size as usize * size as usize];
@@ -183,12 +166,11 @@ fn main() {
         read_depth_exr(&f_zplane.path(), &mut z_plane);
         read_depth_exr(&f_zrear.path(), &mut z_rear);
         read_depth_exr(&f_zupper.path(), &mut z_upper);
-        let zmask = depth_mask(frame, &z_front, &z_rear, &z_upper, &z_plane, &dims);
+
+        let zmask = depth_mask(frame, &z_front, &z_rear, &z_upper, &z_plane, size as u64);
 
         let path_out = zmask_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
         save_webp(path_out, size, &zmask);
-        // let path_out = zmask_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("png");
-        // save_png(path_out, size, &zmask);
     }
 
 }

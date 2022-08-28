@@ -1,8 +1,11 @@
+use arrayfire::*;
 use clap::Parser;
+use image::{EncodableLayout};
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 use std::fs;
-use std::mem;
+use std::mem::{transmute};
+use std::ops::{Not, Shl, Shr, BitAnd, BitOr};
 use std::path::{Path, PathBuf};
 use exr::prelude::*;
 use webp;
@@ -13,11 +16,11 @@ struct ForegroundStruct {
     ao: Vec<f32>,
     diffuse: Vec<f32>,
     glossy: Vec<f32>,
-    index: Vec<f32>,
+    index: Vec<u32>,
     matte: Vec<f32>,
 }
 
-
+#[derive(Debug)]
 enum ForegroundPass {
     AO,
     DIFFUSE,
@@ -26,7 +29,7 @@ enum ForegroundPass {
     MATTE,
 }
 
-
+#[derive(Debug)]
 enum RGBAChannel {
     R,
     G,
@@ -34,14 +37,10 @@ enum RGBAChannel {
     A,
 }
 
-
-fn channel_index(ch: RGBAChannel) -> usize {
-    match ch {
-        RGBAChannel::R => 0,
-        RGBAChannel::G => 1,
-        RGBAChannel::B => 2,
-        RGBAChannel::A => 3,
-    }
+#[derive(Debug)]
+enum WebpCompressionType {
+    LOSSY(f32),
+    LOSSLESS,
 }
 
 
@@ -64,30 +63,33 @@ impl ForegroundStruct {
             ao: vec![0_f32; n * num_channels(ForegroundPass::AO)],
             diffuse: vec![0_f32; n * num_channels(ForegroundPass::DIFFUSE)],
             glossy: vec![0_f32; n * num_channels(ForegroundPass::GLOSSY)],
-            index: vec![0_f32; n * num_channels(ForegroundPass::INDEX)],
+            index: vec![0_u32; n * num_channels(ForegroundPass::INDEX)],
             matte: vec![0_f32; n * num_channels(ForegroundPass::MATTE)],
         }
     }
 
-    fn update(ch: &mut Vec<f32>, channel_data: &Vec<f32>, num_channels: usize, channel_index: usize) {
-        for (i, _) in channel_data.iter().enumerate() {
-            ch[num_channels*i + channel_index] = channel_data[i];
-        }
-    }
-
-    fn set_channel(&mut self, pass: ForegroundPass, channel: RGBAChannel, channel_data: &Vec<f32>) {
+    
+    fn set_channel(&mut self, channel_data: Vec<f32>, pass: ForegroundPass, channel: RGBAChannel) {
+        
         let n = self.resolution * self.resolution;
         if channel_data.len() != n {
             panic!("Error: channel data has incorrect length ({:?})", channel_data.len());
         }
 
+        let offset = n * match channel {
+            RGBAChannel::R => 0,
+            RGBAChannel::G => 1,
+            RGBAChannel::B => 2,
+            RGBAChannel::A => 3,
+        };
+
         match pass {
-            ForegroundPass::AO => Self::update(&mut self.ao, channel_data, num_channels(pass), channel_index(channel)),
-            ForegroundPass::DIFFUSE => Self::update(&mut self.diffuse, channel_data, num_channels(pass), channel_index(channel)),
-            ForegroundPass::GLOSSY => Self::update(&mut self.glossy, channel_data, num_channels(pass), channel_index(channel)),
-            ForegroundPass::INDEX => Self::update(&mut self.index, channel_data, num_channels(pass), channel_index(channel)),
-            ForegroundPass::MATTE => Self::update(&mut self.matte, channel_data, num_channels(pass), channel_index(channel)),
-        }
+            ForegroundPass::AO => { self.ao.splice(offset..offset+n, channel_data); },
+            ForegroundPass::DIFFUSE => { self.diffuse.splice(offset..offset+n, channel_data); },
+            ForegroundPass::GLOSSY => { self.glossy.splice(offset..offset+n, channel_data); },
+            ForegroundPass::INDEX => { self.index.splice(offset..offset+n, unsafe { transmute::<Vec<f32>, Vec<u32>>(channel_data) }); },
+            ForegroundPass::MATTE => { self.matte.splice(offset..offset+n, channel_data); },
+        };
     }
 }
 
@@ -97,10 +99,7 @@ impl ForegroundStruct {
 struct CliArgs {
 
     #[clap(long)]
-    resolution: usize,
-
-    #[clap(long)]
-    config: String,
+    resolution: u32,
 
     #[clap(long, parse(from_os_str))]
     front: PathBuf,
@@ -112,16 +111,7 @@ struct CliArgs {
     upper: PathBuf,
 
     #[clap(long, parse(from_os_str))]
-    zfront: PathBuf,
-
-    #[clap(long, parse(from_os_str))]
-    zrear: PathBuf,
-
-    #[clap(long, parse(from_os_str))]
-    zupper: PathBuf,
-
-    #[clap(long, parse(from_os_str))]
-    zplane: PathBuf,
+    zmask: PathBuf,
 
     #[clap(long, parse(from_os_str))]
     light: PathBuf,
@@ -133,17 +123,8 @@ struct CliArgs {
     matte: PathBuf,
 }
 
-// Used for picking channel from zmask
-// Returns index of channel with largest value, or -1 if no values are above a threshold.
-fn mask(x: &[u8]) -> i32 {
-    let threshold = 5;
-    if x[0] > threshold { return 0; }
-    if x[1] > threshold { return 1; }
-    if x[2] > threshold { return 2; }
-    return -1;
-}
 
-fn get_asset_map() -> HashMap<[u8; 4], u8> {
+fn get_asset_map() -> HashMap<u32, u8> {
     let array: [(u8, f32); 32] = [
         (0, 0.0),
         // (0, -1.1562982805507717e+33), // Mag shell
@@ -180,64 +161,21 @@ fn get_asset_map() -> HashMap<[u8; 4], u8> {
         (30, -84473296.0),
     ];
 
-    HashMap::from(array.map(|v | { (v.1.to_be_bytes(), v.0) }))
+    HashMap::from(array.map(|v | { ( unsafe { transmute::<f32, u32>(v.1) }, v.0) }))
 
-}
-
-// fn get_channels(header: &Header, layers: [&str; 4]) -> Vec<String>{
-//     let mut sorted = Vec::<String>::new();
-//     for layer in layers {
-//         for channel in &header.channels.list {
-//             let name = channel.name.to_string();
-//             if name.as_str().contains(layer) {
-//                 sorted.push(name);
-//             }
-//         }
-//     }
-//     return sorted;
-// }
-
-
-// Luma coefficients taken from Blender's OCIO config file
-#[inline]
-fn luminance(c: &[f32; 3]) -> f32 {
-    return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
 }
 
 
 // #[inline]
-// fn rank_depth(z: &[f32; 4]) -> [u8; 4] {
-//     // let ab: u8 = unsafe { mem::transmute(z[0] > z[1]) };
-//     // let ac: u8 = unsafe { mem::transmute(z[0] > z[2]) };
-//     // let ad: u8 = unsafe { mem::transmute(z[0] > z[3]) };
-//     // let bc: u8 = unsafe { mem::transmute(z[1] > z[2]) };
-//     // let bd: u8 = unsafe { mem::transmute(z[1] > z[3]) };
-//     // let cd: u8 = unsafe { mem::transmute(z[2] > z[3]) };
-
-//     let ab = z[0] > z[1];
-//     let ac = z[0] > z[2];
-//     let ad = z[0] > z[3];
-//     let bc = z[1] > z[2];
-//     let bd = z[1] > z[3];
-//     let cd = z[2] > z[3];
-    
-//     let a = 0_u8;
-//     let b = 0_u8;
-//     let c = 0_u8;
-//     let d = 0_u8;
+// fn pack_index(x: &[u8; 4]) -> [u8; 3] {
+//     let a = x[0] | (x[1] & 0b11) << 6;
+//     let b = (x[1] & 0b111100) >> 2 | (x[2] & 0b1111) << 4;
+//     let c = (x[2] & 0b110000) >> 4 | x[3] << 2;
+//     return [a, b, c];
 // }
 
 
-#[inline]
-fn pack_index(x: &[u8; 4]) -> [u8; 3] {
-    let a = x[0] | (x[1] & 0b11) << 6;
-    let b = (x[1] & 0b111100) >> 2 | (x[2] & 0b1111) << 4;
-    let c = (x[2] & 0b110000) >> 4 | x[3] << 2;
-    return [a, b, c];
-}
-
-
-fn read_foreground_exr(path: &Path, resolution: usize) -> ForegroundStruct {
+fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
 
     // There are 21 channels in total.
     // Colors organized as (A, B, G, R), but some channels (AO, Diffuse, Glossy) do not contain alpha
@@ -259,7 +197,7 @@ fn read_foreground_exr(path: &Path, resolution: usize) -> ForegroundStruct {
         .channel_data
         .list;
 
-    let mut obj = ForegroundStruct::new(resolution);
+    let mut obj = ForegroundStruct::new(resolution as usize);
 
     let f = |ch: &AnyChannel<FlatSamples>| {
         match &ch.sample_data {
@@ -270,23 +208,23 @@ fn read_foreground_exr(path: &Path, resolution: usize) -> ForegroundStruct {
     
     for (i, _) in channels.iter().enumerate() {
         match i {
-            0 => obj.set_channel(ForegroundPass::AO, RGBAChannel::B, &f(&channels[i])),         // AO.B
-            1 => obj.set_channel(ForegroundPass::AO, RGBAChannel::G, &f(&channels[i])),         // AO.G
-            2 => obj.set_channel(ForegroundPass::AO, RGBAChannel::A, &f(&channels[i])),         // AO.R
-            7 => obj.set_channel(ForegroundPass::INDEX, RGBAChannel::A, &f(&channels[i])),      // Crypto00.A
-            8 => obj.set_channel(ForegroundPass::INDEX, RGBAChannel::B, &f(&channels[i])),      // Crypto00.B
-            9 => obj.set_channel(ForegroundPass::INDEX, RGBAChannel::G, &f(&channels[i])),      // Crypto00.G
-            10 => obj.set_channel(ForegroundPass::INDEX, RGBAChannel::R, &f(&channels[i])),     // Crypto00.R
-            11 => obj.set_channel(ForegroundPass::MATTE, RGBAChannel::A, &f(&channels[i])),     // Crypto01.A
-            12 => obj.set_channel(ForegroundPass::MATTE, RGBAChannel::B, &f(&channels[i])),     // Crypto01.B
-            13 => obj.set_channel(ForegroundPass::MATTE, RGBAChannel::G, &f(&channels[i])),     // Crypto01.G
-            14 => obj.set_channel(ForegroundPass::MATTE, RGBAChannel::R, &f(&channels[i])),     // Crypto01.R
-            15 => obj.set_channel(ForegroundPass::DIFFUSE, RGBAChannel::B, &f(&channels[i])),   // Diffuse.B
-            16 => obj.set_channel(ForegroundPass::DIFFUSE, RGBAChannel::G, &f(&channels[i])),   // Diffuse.G
-            17 => obj.set_channel(ForegroundPass::DIFFUSE, RGBAChannel::R, &f(&channels[i])),   // Diffuse.R
-            18 => obj.set_channel(ForegroundPass::GLOSSY, RGBAChannel::B, &f(&channels[i])),    // Glossy.B
-            19 => obj.set_channel(ForegroundPass::GLOSSY, RGBAChannel::G, &f(&channels[i])),    // Glossy.G
-            20 => obj.set_channel(ForegroundPass::GLOSSY, RGBAChannel::R, &f(&channels[i])),    // Glossy.R
+            0 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::B),         // AO.B
+            1 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::G),         // AO.G
+            2 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::R),         // AO.R
+            7 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::A),      // Crypto00.A
+            8 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::B),      // Crypto00.B
+            9 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::G),      // Crypto00.G
+            10 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::R),     // Crypto00.R
+            11 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::A),     // Crypto01.A
+            12 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::B),     // Crypto01.B
+            13 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::G),     // Crypto01.G
+            14 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::R),     // Crypto01.R
+            15 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::B),   // Diffuse.B
+            16 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::G),   // Diffuse.G
+            17 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::R),   // Diffuse.R
+            18 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::B),    // Glossy.B
+            19 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::G),    // Glossy.G
+            20 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::R),    // Glossy.R
             _ => {},
         };
     }
@@ -295,102 +233,127 @@ fn read_foreground_exr(path: &Path, resolution: usize) -> ForegroundStruct {
 }
 
 
-fn read_depth_exr(path: &Path) -> Vec<f32> {
-    
-    let channel = exr::prelude::read()
-        .no_deep_data()
-        .largest_resolution_level()
-        .all_channels()
-        .first_valid_layer()
-        .all_attributes()
-        .from_file(path)
-        .unwrap()
-        .layer_data
-        .channel_data
-        .list;
-        
-    let pixels = match &channel.last().unwrap().sample_data {
-        exr::prelude::FlatSamples::F32(x) => x,
-        _ => panic!("Unexpected channel type"),
-    };
-    
-    return pixels.to_owned();
-}
-
-
 fn composite(
-    size: usize,
-    map: &HashMap<[u8; 4], u8>,
-    front: &ForegroundStruct,
-    rear: &ForegroundStruct,
-    upper: &ForegroundStruct,
-    zfront: &Vec<f32>,
-    zrear: &Vec<f32>,
-    zupper: &Vec<f32>,
-    zplane: &Vec<f32>
+    map: &HashMap<u32, u8>,
+    front: ForegroundStruct,
+    rear: ForegroundStruct,
+    upper: ForegroundStruct,
+    zmask: &Vec<u8>,
+    size: u64,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    let num_pixels = size*size;
-    let mut light = vec![0_u8; num_pixels * 3];
-    let mut index = vec![0_u8; num_pixels * 3];
-    let mut matte = vec![0_u8; num_pixels * 3];
+    
+    let dim3 = dim4!(size, size, 3);
+    let dim4 = dim4!(size, size, 4);
 
-    for i in 0..num_pixels {
+    let mut light = vec!(0; dim3.elements() as usize);
+    let mut index = vec!(0; dim3.elements() as usize);
+    let mut matte = vec!(0; dim3.elements() as usize);
 
-        // Sort Z
+    let mut a_zmask = Array::new(zmask, dim4!(3, size, size)).cast::<bool>();
+    a_zmask = reorder_v2(&a_zmask, 1, 2, Some(vec![0]));
 
-        // Map index
+    // NOTE: `1:1:0` means all elements along axis
+    let m_front = view!(a_zmask[1:1:0, 1:1:0, 0:0:1]);
+    let m_rear = view!(a_zmask[1:1:0, 1:1:0, 1:1:1]);
+    let m_upper = view!(a_zmask[1:1:0, 1:1:0, 2:2:1]);
 
-        // Add matte
-        
-        // Combine light passes
+    // **************************************************
+    // LIGHT
+    // **************************************************
+    let a_front_ao = Array::new(&front.ao, dim3);
+    let a_rear_ao = Array::new(&rear.ao, dim3);
+    let a_upper_ao = Array::new(&upper.ao, dim3);
+    
+    let a_front_diffuse = Array::new(&front.diffuse, dim3);
+    let a_rear_diffuse = Array::new(&rear.diffuse, dim3);
+    let a_upper_diffuse = Array::new(&upper.diffuse, dim3);
+    
+    let a_front_glossy = Array::new(&front.glossy, dim3);
+    let a_rear_glossy = Array::new(&rear.glossy, dim3);
+    let a_upper_glossy = Array::new(&upper.glossy, dim3);
+    
+    let mut a_ao = constant::<f32>(0_f32, dim3);
+    let mut a_diffuse = constant::<f32>(0_f32, dim3);
+    let mut a_glossy = constant::<f32>(0_f32, dim3);
 
-        // Convert to u8
+    a_ao = select(&a_front_ao, &m_front, &a_ao);
+    a_ao = select(&a_rear_ao, &m_rear, &a_ao);
+    a_ao = select(&a_upper_ao, &m_upper, &a_ao);
 
-        // let zfront = &zfront[3*i..3*i+3];
-        // let zrear = &zrear[3*i..3*i+3];
-        // let zupper = &zupper[3*i..3*i+3];
+    a_diffuse = select(&a_front_diffuse, &m_front, &a_diffuse);
+    a_diffuse = select(&a_rear_diffuse, &m_rear, &a_diffuse);
+    a_diffuse = select(&a_upper_diffuse, &m_upper, &a_diffuse);
 
-        // let idx1 = &front[8*i..8*i+4];
-        // let idx2 = &rear[8*i..8*i+4];
-        // let idx3 = &upper[8*i..8*i+4];
+    a_glossy = select(&a_front_glossy, &m_front, &a_glossy);
+    a_glossy = select(&a_rear_glossy, &m_rear, &a_glossy);
+    a_glossy = select(&a_upper_glossy, &m_upper, &a_glossy);
+    
+    let luma = Array::new(&[0.2126_f32, 0.7152_f32, 0.0722_f32], dim4!(1, 1, 3));
 
-        // let val1 = &front[8*i+4..8*i+8];
-        // let val2 = &rear[8*i+4..8*i+8];
-        // let val3 = &upper[8*i+4..8*i+8];
+    a_ao = mul(&a_ao, &luma, true);
+    a_diffuse = mul(&a_diffuse, &luma, true);
+    a_glossy = mul(&a_glossy, &luma, true);
 
-        // let (idx, val) = match mask(z) {
-        //     0 => (idx1, val1),
-        //     1 => (idx2, val2),
-        //     2 => (idx3, val3),
-        //     _ => ([0_f32; 4].as_slice(), [0_f32; 4].as_slice())
-        // };
+    a_ao = sum(&a_ao, 2);
+    a_diffuse = sum(&a_diffuse, 2);
+    a_glossy = sum(&a_glossy, 2);
 
-        // // let id = idx.into_iter().map(|x| { map[&x.to_be_bytes()] }).collect::<Vec<u8>>();
-        // let id = idx.into_iter().map(|x| {
-        //     let y = match map.get(&x.to_be_bytes()) {
-        //         None => panic!("Missing key: {}", *x),
-        //         Some(num) => *num
-        //     };
-        //     return y;
-        // }).collect::<Vec<u8>>();
-        // let i_r = id[0] | (id[1] & 0b11) << 6;
-        // let i_g = (id[1] & 0b111100) >> 2 | (id[2] & 0b1111) << 4;
-        // let i_b = (id[2] & 0b110000) >> 4 | id[3] << 2;
+    let mut a_light = join_many![2; &a_diffuse, &a_glossy, &a_ao];
+    a_light = log2(&a_light);
+    a_light = add(&a_light, &(12.473931188_f32), true);
+    a_light = div(&a_light, &(25_f32), true);
+    a_light = mul(&a_light, &(2.0_f32 * 255_f32), true);
+    a_light = clamp(&a_light, &(0_f32), &(255_f32), true);
+    a_light = reorder_v2(&a_light, 2, 0, Some(vec![1]));
+    a_light.cast::<u8>().host::<u8>(&mut light);
 
-        // let m_r = (2.0 * val[1] * 255_f32) as u8;
-        // let m_g = (2.0 * val[2] * 255_f32) as u8;
-        // let m_b = (2.0 * val[3] * 255_f32) as u8;
+    // **************************************************
+    // MATTE
+    // **************************************************
+    let a_front_index = Array::new(&front.index, dim4);
+    let a_rear_index = Array::new(&rear.index, dim4);
+    let a_upper_index = Array::new(&upper.index, dim4);
 
-        // index.splice(3*i..3*i+3, [i_r, i_g, i_b]);
-        // matte.splice(3*i..3*i+3, [m_r, m_g, m_b]);
+    let a_front_matte = Array::new(&front.matte, dim4);
+    let a_rear_matte = Array::new(&rear.matte, dim4);
+    let a_upper_matte = Array::new(&upper.matte, dim4);
+
+    // TODO: rank matte values
+    // filter by id
+    // sum_by_key
+    // topk (k=4)
+
+    // Map index values
+    let mut a_index = constant(0, dim4);
+    for (k, v) in map {
+        let cond = eq(&a_index, k, true);
+        replace(&mut a_index, &cond, &constant(*v, dim4));
     }
+
+    // TODO: bit-pack index values
+    let r_1 = view!(a_index[1:1:0, 1:1:0, 0:0:1]).cast::<u8>();
+    let r_2 = view!(a_index[1:1:0, 1:1:0, 1:1:1]).cast::<u8>();
+    let r_3 = view!(a_index[1:1:0, 1:1:0, 2:2:1]).cast::<u8>();
+    let r_4 = view!(a_index[1:1:0, 1:1:0, 3:3:1]).cast::<u8>();
+
+    let d = dim4!(size, size);
+    let a_r = bitor(&r_1, &bitand(&r_2, &constant(0b11u8, d), false).shl(6_u8), false);
+    let a_g = bitor(&bitand(&r_2, &constant(0b111100u8, d), false).shr(2_u8), &bitand(&r_3, &constant(0b1111u8, d), false).shl(4_u8), false);
+    let a_b = bitor(&bitand(&r_3, &constant(0b110000u8, d), false).shr(4_u8), &r_4.shl(2_u8), false);
+
+    let mut a_index = join_many![2; &a_r, &a_g, &a_b];
+    a_index = reorder_v2(&a_index, 2, 0, Some(vec![1]));
+    a_index.cast::<u8>().host::<u8>(&mut index);
+
     return (light, index, matte);
 }
 
 
-fn save_webp(path: PathBuf, size: usize, pixels: &Vec<u8>) {
-    // print!("path: {:?}\n", path);
-    let img = webp::Encoder::from_rgb(pixels, size as u32, size as u32).encode_lossless();
+fn save_webp(path: PathBuf, size: u32, pixels: &Vec<u8>, compression: WebpCompressionType) {
+    let img = match compression {
+        WebpCompressionType::LOSSLESS => webp::Encoder::from_rgb(pixels, size, size).encode_lossless(),
+        WebpCompressionType::LOSSY(quality) => webp::Encoder::from_rgb(pixels, size, size).encode(quality),
+    };
     let _ = fs::create_dir_all(path.clone().parent().unwrap());
     let mut buffered_file_write = BufWriter::new(fs::File::create(path).unwrap());
     buffered_file_write.write_all(&img).unwrap();
@@ -401,14 +364,10 @@ fn main() {
     let args = CliArgs::parse();
     
     let size = args.resolution;
-    let config = &args.config;
     let front_dir = &args.front;
     let rear_dir = &args.rear;
     let upper_dir = &args.upper;
-    let zfront_dir = &args.zfront;
-    let zrear_dir = &args.zrear;
-    let zupper_dir = &args.zupper;
-    let zplane_path = &args.zplane;
+    let zmask_dir = &args.zmask;
     let light_dir = &args.light;
     let index_dir = &args.index;
     let matte_dir = &args.matte;
@@ -416,51 +375,42 @@ fn main() {
     let front_files = fs::read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
     let rear_files = fs::read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
     let upper_files = fs::read_dir(upper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let zfront_files = fs::read_dir(zfront_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let zrear_files = fs::read_dir(zrear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let zupper_files = fs::read_dir(zupper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let zmask_files = fs::read_dir(zmask_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
 
     let num_frames = 144;
     if front_files.len() != num_frames { panic!("Missing 'Front' files"); }
     if rear_files.len() != num_frames { panic!("Missing 'Rear' files"); }
     if upper_files.len() != num_frames { panic!("Missing 'Upper' files"); }
-    if zfront_files.len() != num_frames { panic!("Missing 'Z Front' files"); }
-    if zrear_files.len() != num_frames { panic!("Missing 'Z Rear' files"); }
-    if zupper_files.len() != num_frames { panic!("Missing 'Z Upper' files"); }
-
-    let zplane = read_depth_exr(&zplane_path);
+    if zmask_files.len() != num_frames { panic!("Missing 'ZMask' files"); }
 
     let map = get_asset_map();
 
-    for i in 0..num_frames {
-        let f_front = &front_files[i];
-        let f_rear = &rear_files[i];
-        let f_upper = &upper_files[i];
-        let f_zfront = &zfront_files[i];
-        let f_zrear = &zrear_files[i];
-        let f_zupper = &zupper_files[i];
+    for frame in 0..num_frames {
+        let f_front = &front_files[frame];
+        let f_rear = &rear_files[frame];
+        let f_upper = &upper_files[frame];
+        let f_zmask = &zmask_files[frame];
 
         let front = read_foreground_exr(&f_front.path(), size);
         let rear = read_foreground_exr(&f_rear.path(), size);
         let upper = read_foreground_exr(&f_upper.path(), size);
-        let zfront = read_depth_exr(&f_zfront.path());
-        let zrear = read_depth_exr(&f_zrear.path());
-        let zupper = read_depth_exr(&f_zupper.path());
+        let zmask = image::open(f_zmask.path()).unwrap().to_rgb8().as_bytes().to_vec();
 
         let (light, index, matte) = composite(
-            size,
             &map,
-            &front,
-            &rear,
-            &upper,
-            &zfront,
-            &zrear,
-            &zupper,
-            &zplane,
+            front,
+            rear,
+            upper,
+            &zmask,
+            size as u64,
         );
 
-        save_webp(light_dir.join(config), size, &light);
-        save_webp(index_dir.join(config), size, &index);
-        save_webp(matte_dir.join(config), size, &matte);
+        let path_out_light = light_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
+        // let path_out_index = index_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
+        // let path_out_matte = matte_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
+
+        save_webp(path_out_light, size, &light, WebpCompressionType::LOSSY(100.0));
+        // save_webp(path_out_index, size, &index, WebpCompressionType::LOSSLESS);
+        // save_webp(path_out_matte, size, &matte, WebpCompressionType::LOSSLESS);
     }
 }

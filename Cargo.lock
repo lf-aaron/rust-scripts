@@ -260,10 +260,10 @@ dependencies = [
 name = "foreground"
 version = "0.1.0"
 dependencies = [
+ "arrayfire",
  "clap",
  "exr",
  "image",
- "rayon",
  "webp",
 ]
 
