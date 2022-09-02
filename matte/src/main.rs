@@ -81,6 +81,9 @@ struct CliArgs {
 
     #[clap(long, parse(from_os_str))]
     matte: PathBuf,
+
+    #[clap(long)]
+    device: i32,
 }
 
 
@@ -244,6 +247,10 @@ fn main() {
     let in_dir = &args.input;
     let matte_dir = &args.matte;
     let index_dir = &args.index;
+    let device = args.device;
+
+    set_backend(Backend::CUDA);
+    set_device(device);
 
     let in_files = fs::read_dir(in_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
 

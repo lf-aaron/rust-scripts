@@ -102,6 +102,9 @@ struct CliArgs {
 
     #[clap(long, parse(from_os_str))]
     light: PathBuf,
+
+    #[clap(long)]
+    device: i32,
 }
 
 
@@ -258,6 +261,10 @@ fn main() {
     let upper_dir = &args.upper;
     let zmask_dir = &args.zmask;
     let light_dir = &args.light;
+    let device = args.device;
+
+    set_backend(Backend::CUDA);
+    set_device(device);
 
     let front_files = fs::read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
     let rear_files = fs::read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();

@@ -29,6 +29,9 @@ struct CliArgs {
 
     #[clap(long, parse(from_os_str))]
     zmask: PathBuf,
+
+    #[clap(long)]
+    device: i32,
 }
 
 
@@ -138,6 +141,10 @@ fn main() {
     let zupper_dir = &args.zupper;
     let zplane_path = &args.zplane;
     let zmask_dir = &args.zmask;
+    let device = args.device;
+
+    set_backend(Backend::CUDA);
+    set_device(device);
 
     let zfront_files = fs::read_dir(zfront_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
     let zplane_files = fs::read_dir(zplane_path).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
