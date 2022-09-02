@@ -3,7 +3,7 @@ use clap::Parser;
 use std::io::{BufWriter, Write};
 use std::fs;
 use std::mem::{transmute};
-use std::ops::{Shl, Shr, BitAnd, BitOr};
+use std::ops::{Not, Shl, Shr};
 use std::path::{Path, PathBuf};
 use exr::prelude::*;
 use webp;
@@ -58,7 +58,8 @@ impl MatteStruct {
         };
 
         match pass {
-            MattePass::INDEX => { self.index.splice(offset..offset+n, unsafe { transmute::<Vec<f32>, Vec<u32>>(channel_data) }); },
+            MattePass::INDEX => { self.index.splice(offset..offset+n, unsafe { channel_data.into_iter().map(|x| {transmute::<f32, u32>(x)}).collect::<Vec<u32>>()}); },
+            // MattePass::INDEX => { self.index.splice(offset..offset+n, unsafe { transmute::<Vec<f32>, Vec<u32>>(channel_data) }); },
             MattePass::MATTE => { self.matte.splice(offset..offset+n, channel_data); },
         };
     }
@@ -83,7 +84,7 @@ struct CliArgs {
 }
 
 
-fn get_index_map() -> [(u8, f32); 32] {
+fn get_index_map() -> [(u32, f32); 32] {
     [
         (0, 0.0),
         // (0, -1.1562982805507717e+33), // Mag shell
@@ -155,14 +156,14 @@ fn read_matte_exr(path: &Path, resolution: u32) -> MatteStruct {
     
     for (i, _) in channels.iter().enumerate() {
         match i {
-            4 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::A),      // Crypto00.A
-            5 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::B),      // Crypto00.B
-            6 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::G),      // Crypto00.G
-            7 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::R),     // Crypto00.R
-            8 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::A),     // Crypto01.A
-            9 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::B),     // Crypto01.B
-            10 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::G),     // Crypto01.G
-            11 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::R),     // Crypto01.R
+            4 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::G),    // Crypto00.A
+            5 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::G),    // Crypto00.B
+            6 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::R),    // Crypto00.G
+            7 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::R),    // Crypto00.R
+            8 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::A),    // Crypto01.A
+            9 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::A),    // Crypto01.B
+            10 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::B),   // Crypto01.G
+            11 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::B),   // Crypto01.R
             _ => {},
         };
     }
@@ -172,7 +173,7 @@ fn read_matte_exr(path: &Path, resolution: u32) -> MatteStruct {
 
 
 fn composite(
-    arr: &[(u8, f32); 32],
+    arr: &[(u32, f32); 32],
     exr: MatteStruct,
     size: u64,
 ) -> (Vec<u8>, Vec<u8>) {
@@ -183,12 +184,11 @@ fn composite(
     let mut index = vec!(0; dim3.elements() as usize);
     let mut matte = vec!(0; dim3.elements() as usize);
 
-
     // Map index values
     let mut a_index = Array::new(&exr.index, dim4);
     for (k, v) in arr {
-        let cond = eq(&a_index, k, true);
-        replace(&mut a_index, &cond, &constant(unsafe { transmute::<f32, u32>(*v) }, dim4));
+        let cond = eq(&a_index, &constant(unsafe { transmute::<f32, u32>(*v) }, dim4), false);
+        replace(&mut a_index, &cond.not(), &constant(*k, dim4));
     }
     
     // Bit-pack
@@ -213,10 +213,10 @@ fn composite(
     let mut r_2 = view!(a_matte[1:1:0, 1:1:0, 2:2:1]);
     let mut r_3 = view!(a_matte[1:1:0, 1:1:0, 3:3:1]);
 
-    // TODO: Use 9 bits for rank 2
+    // TODO: Use 9 bits for rank 2?
     r_1 = clamp(&mul(&r_1, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
-    r_2 = clamp(&mul(&r_2, &(3.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
-    r_3 = clamp(&mul(&r_3, &(4.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
+    r_2 = clamp(&mul(&r_2, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
+    r_3 = clamp(&mul(&r_3, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
 
     a_matte = join_many![2; &r_1, &r_2, &r_3];
     a_matte = reorder_v2(&a_matte, 2, 0, Some(vec![1]));

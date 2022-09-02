@@ -3,7 +3,6 @@ use clap::Parser;
 use image::{EncodableLayout};
 use std::io::{BufWriter, Write};
 use std::fs;
-use std::mem::{transmute};
 use std::path::{Path, PathBuf};
 use exr::prelude::*;
 use webp;
@@ -14,8 +13,6 @@ struct ForegroundStruct {
     ao: Vec<f32>,
     diffuse: Vec<f32>,
     glossy: Vec<f32>,
-    index: Vec<u32>,
-    matte: Vec<f32>,
 }
 
 #[derive(Debug)]
@@ -23,8 +20,6 @@ enum ForegroundPass {
     AO,
     DIFFUSE,
     GLOSSY,
-    INDEX,
-    MATTE,
 }
 
 #[derive(Debug)]
@@ -47,8 +42,6 @@ fn num_channels(pass: ForegroundPass) -> usize {
         ForegroundPass::AO => 3,
         ForegroundPass::DIFFUSE => 3,
         ForegroundPass::GLOSSY => 3,
-        ForegroundPass::INDEX => 4,
-        ForegroundPass::MATTE => 4,
     }
 }
 
@@ -61,8 +54,6 @@ impl ForegroundStruct {
             ao: vec![0_f32; n * num_channels(ForegroundPass::AO)],
             diffuse: vec![0_f32; n * num_channels(ForegroundPass::DIFFUSE)],
             glossy: vec![0_f32; n * num_channels(ForegroundPass::GLOSSY)],
-            index: vec![0_u32; n * num_channels(ForegroundPass::INDEX)],
-            matte: vec![0_f32; n * num_channels(ForegroundPass::MATTE)],
         }
     }
 
@@ -85,8 +76,6 @@ impl ForegroundStruct {
             ForegroundPass::AO => { self.ao.splice(offset..offset+n, channel_data); },
             ForegroundPass::DIFFUSE => { self.diffuse.splice(offset..offset+n, channel_data); },
             ForegroundPass::GLOSSY => { self.glossy.splice(offset..offset+n, channel_data); },
-            ForegroundPass::INDEX => { self.index.splice(offset..offset+n, unsafe { transmute::<Vec<f32>, Vec<u32>>(channel_data) }); },
-            ForegroundPass::MATTE => { self.matte.splice(offset..offset+n, channel_data); },
         };
     }
 }
@@ -149,23 +138,27 @@ fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
     
     for (i, _) in channels.iter().enumerate() {
         match i {
-            0 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::B),         // AO.B
-            1 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::G),         // AO.G
-            2 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::R),         // AO.R
-            7 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::A),      // Crypto00.A
-            8 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::B),      // Crypto00.B
-            9 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::G),      // Crypto00.G
-            10 => obj.set_channel(f(&channels[i]), ForegroundPass::INDEX, RGBAChannel::R),     // Crypto00.R
-            11 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::A),     // Crypto01.A
-            12 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::B),     // Crypto01.B
-            13 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::G),     // Crypto01.G
-            14 => obj.set_channel(f(&channels[i]), ForegroundPass::MATTE, RGBAChannel::R),     // Crypto01.R
-            15 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::B),   // Diffuse.B
-            16 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::G),   // Diffuse.G
-            17 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::R),   // Diffuse.R
-            18 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::B),    // Glossy.B
-            19 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::G),    // Glossy.G
-            20 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::R),    // Glossy.R
+            0 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::B),        // AO.B
+            1 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::G),        // AO.G
+            2 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::R),        // AO.R
+            // 3                                                                              // Combined.A
+            // 4                                                                              // Combined.B
+            // 5                                                                              // Combined.G
+            // 6                                                                              // Combined.R
+            // 7                                                                              // Crypto00.A
+            // 8                                                                              // Crypto00.B
+            // 9                                                                              // Crypto00.G
+            // 10                                                                             // Crypto00.R
+            // 11                                                                             // Crypto01.A
+            // 12                                                                             // Crypto01.B
+            // 13                                                                             // Crypto01.G
+            // 14                                                                             // Crypto01.R
+            15 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::B),  // Diffuse.B
+            16 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::G),  // Diffuse.G
+            17 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::R),  // Diffuse.R
+            18 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::B),   // Glossy.B
+            19 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::G),   // Glossy.G
+            20 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::R),   // Glossy.R
             _ => {},
         };
     }
