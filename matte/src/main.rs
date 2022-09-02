@@ -85,7 +85,7 @@ struct CliArgs {
     #[clap(long)]
     device: i32,
 
-    #[clap(long, default_value_t=false)]
+    #[clap(long)]
     overwrite: bool,
 }
 
@@ -274,7 +274,6 @@ fn main() {
         let exr = read_matte_exr(&f_in.path(), size);
 
         let (index, matte) = composite(&arr, exr, size as u64);
-
 
         save_webp(path_out_index, size, &index, WebpCompressionType::LOSSLESS);
         save_webp(path_out_matte, size, &matte, WebpCompressionType::LOSSLESS);

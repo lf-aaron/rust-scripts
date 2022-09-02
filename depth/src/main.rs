@@ -33,7 +33,7 @@ struct CliArgs {
     #[clap(long)]
     device: i32,
 
-    #[clap(long, default_value_t=false)]
+    #[clap(long)]
     overwrite: bool,
 }
 
