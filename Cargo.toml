@@ -2,7 +2,8 @@
 
 members = [
   "lut",
-  "foreground",
   "depth",
+  "foreground",
+  "matte",
   "test"
 ]

@@ -1,0 +1,13 @@
+[package]
+name = "matte"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+arrayfire = "3.8"
+clap = { version = "3.1.18", features = ["derive"] }
+exr = "1.4.2"
+image = "0.24.2"
+webp = "0.2.2"
