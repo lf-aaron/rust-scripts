@@ -32,6 +32,9 @@ struct CliArgs {
 
     #[clap(long)]
     device: i32,
+
+    #[clap(long, default_value_t=false)]
+    overwrite: bool,
 }
 
 
@@ -142,6 +145,7 @@ fn main() {
     let zplane_path = &args.zplane;
     let zmask_dir = &args.zmask;
     let device = args.device;
+    let overwrite = args.overwrite;
 
     set_backend(Backend::CUDA);
     set_device(device);
@@ -163,6 +167,10 @@ fn main() {
     let mut z_upper = vec![0_f32; size as usize * size as usize];
 
     for frame in 0..num_frames {
+        let path_out = zmask_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
+        if !overwrite && path_out.exists() {
+            continue;
+        }
 
         let f_zplane = &zplane_files[frame];
         let f_zfront = &zfront_files[frame];
@@ -176,7 +184,6 @@ fn main() {
 
         let zmask = depth_mask(frame, &z_front, &z_rear, &z_upper, &z_plane, size as u64);
 
-        let path_out = zmask_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
         save_webp(path_out, size, &zmask);
     }
 

@@ -105,6 +105,9 @@ struct CliArgs {
 
     #[clap(long)]
     device: i32,
+
+    #[clap(long, default_value_t=false)]
+    overwrite: bool,
 }
 
 
@@ -262,6 +265,7 @@ fn main() {
     let zmask_dir = &args.zmask;
     let light_dir = &args.light;
     let device = args.device;
+    let overwrite = args.overwrite;
 
     set_backend(Backend::CUDA);
     set_device(device);
@@ -278,6 +282,11 @@ fn main() {
     if zmask_files.len() != num_frames { panic!("Missing 'ZMask' files"); }
 
     for frame in 0..num_frames {
+        let path_out = light_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
+        if !overwrite && path_out.exists() {
+            continue;
+        }
+
         let f_front = &front_files[frame];
         let f_rear = &rear_files[frame];
         let f_upper = &upper_files[frame];
@@ -296,7 +305,6 @@ fn main() {
             size as u64,
         );
 
-        let path_out = light_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
         save_webp(path_out, size, &light, WebpCompressionType::LOSSY(100.0));
     }
 }

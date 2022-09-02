@@ -84,6 +84,9 @@ struct CliArgs {
 
     #[clap(long)]
     device: i32,
+
+    #[clap(long, default_value_t=false)]
+    overwrite: bool,
 }
 
 
@@ -248,6 +251,7 @@ fn main() {
     let matte_dir = &args.matte;
     let index_dir = &args.index;
     let device = args.device;
+    let overwrite = args.overwrite;
 
     set_backend(Backend::CUDA);
     set_device(device);
@@ -260,14 +264,17 @@ fn main() {
     let arr = get_index_map();
 
     for frame in 0..num_frames {
+        let path_out_index = index_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
+        let path_out_matte = matte_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
+        if !overwrite && path_out_index.exists() && path_out_matte.exists() {
+            continue;
+        }
+        
         let f_in = &in_files[frame];
-
         let exr = read_matte_exr(&f_in.path(), size);
 
         let (index, matte) = composite(&arr, exr, size as u64);
 
-        let path_out_index = index_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
-        let path_out_matte = matte_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
 
         save_webp(path_out_index, size, &index, WebpCompressionType::LOSSLESS);
         save_webp(path_out_matte, size, &matte, WebpCompressionType::LOSSLESS);
