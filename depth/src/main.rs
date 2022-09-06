@@ -150,16 +150,21 @@ fn main() {
     set_backend(Backend::CUDA);
     set_device(device);
 
-    let zfront_files = fs::read_dir(zfront_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let zplane_files = fs::read_dir(zplane_path).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let zrear_files = fs::read_dir(zrear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let zupper_files = fs::read_dir(zupper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut zfront_files = fs::read_dir(zfront_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut zplane_files = fs::read_dir(zplane_path).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut zrear_files = fs::read_dir(zrear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut zupper_files = fs::read_dir(zupper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
 
     let num_frames = 144;
     if zfront_files.len() != num_frames { panic!("Missing 'Z Front' files"); }
     if zplane_files.len() != num_frames { panic!("Missing 'Z Front' files"); }
     if zrear_files.len() != num_frames { panic!("Missing 'Z Rear' files"); }
     if zupper_files.len() != num_frames { panic!("Missing 'Z Upper' files"); }
+
+    zfront_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    zplane_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    zrear_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    zupper_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
 
     let mut z_front = vec![0_f32; size as usize * size as usize];
     let mut z_plane = vec![0_f32; size as usize * size as usize];

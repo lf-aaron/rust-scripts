@@ -256,10 +256,12 @@ fn main() {
     set_backend(Backend::CUDA);
     set_device(device);
 
-    let in_files = fs::read_dir(in_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut in_files = fs::read_dir(in_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
 
     let num_frames = 144;
     if in_files.len() != num_frames { panic!("Missing 'Front' files"); }
+
+    in_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
 
     let arr = get_index_map();
 

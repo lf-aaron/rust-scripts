@@ -270,10 +270,10 @@ fn main() {
     set_backend(Backend::CUDA);
     set_device(device);
 
-    let front_files = fs::read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let rear_files = fs::read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let upper_files = fs::read_dir(upper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let zmask_files = fs::read_dir(zmask_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut front_files = fs::read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut rear_files = fs::read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut upper_files = fs::read_dir(upper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut zmask_files = fs::read_dir(zmask_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
 
     let num_frames = 144;
     if front_files.len() != num_frames { panic!("Missing 'Front' files"); }
@@ -281,6 +281,11 @@ fn main() {
     if upper_files.len() != num_frames { panic!("Missing 'Upper' files"); }
     if zmask_files.len() != num_frames { panic!("Missing 'ZMask' files"); }
 
+    front_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    rear_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    upper_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    zmask_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    
     for frame in 0..num_frames {
         let path_out = light_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
         if !overwrite && path_out.exists() {
