@@ -234,8 +234,7 @@ fn composite(
     let mut a_light = join_many![2; &a_diffuse, &a_glossy, &a_ao];
     a_light = log2(&a_light);
     a_light = add(&a_light, &(12.473931188_f32), true);
-    a_light = div(&a_light, &(25_f32), true);
-    a_light = mul(&a_light, &(2.0_f32 * 255_f32), true);
+    a_light = mul(&a_light, &(0.04_f32 * 2_f32 * 255_f32), true);
     a_light = clamp(&a_light, &(0_f32), &(255_f32), true);
     a_light = reorder_v2(&a_light, 2, 0, Some(vec![1]));
     a_light.cast::<u8>().host::<u8>(&mut light);
@@ -310,6 +309,7 @@ fn main() {
             size as u64,
         );
 
-        save_webp(path_out, size, &light, WebpCompressionType::LOSSY(100.0));
+        save_webp(path_out, size, &light, WebpCompressionType::LOSSLESS);
+        // save_webp(path_out, size, &light, WebpCompressionType::LOSSY(100.0));
     }
 }
