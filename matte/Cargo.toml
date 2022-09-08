@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+util = { path = "../util" }
 arrayfire = "3.8"
 clap = { version = "3.1.18", features = ["derive"] }
 exr = "1.4.2"

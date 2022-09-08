@@ -1,12 +1,11 @@
 use arrayfire::*;
 use clap::Parser;
-use std::io::{BufWriter, Write};
 use std::fs;
 use std::mem::{transmute};
 use std::ops::{Not, Shl, Shr};
 use std::path::{Path, PathBuf};
 use exr::prelude::*;
-use webp;
+use util::{RGBAChannel, WebpCompressionType, save_webp};
 
 
 struct MatteStruct {
@@ -19,19 +18,6 @@ enum MattePass {
     INDEX,
     MATTE,
 }
-
-enum RGBAChannel {
-    R,
-    G,
-    B,
-    A,
-}
-
-enum WebpCompressionType {
-    LOSSY(f32),
-    LOSSLESS,
-}
-
 
 impl MatteStruct {
     fn new (resolution: usize) -> Self {
@@ -219,7 +205,6 @@ fn composite(
     let mut r_2 = view!(a_matte[1:1:0, 1:1:0, 2:2:1]);
     let mut r_3 = view!(a_matte[1:1:0, 1:1:0, 3:3:1]);
 
-    // TODO: Use 9 bits for rank 2?
     r_1 = clamp(&mul(&r_1, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
     r_2 = clamp(&mul(&r_2, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
     r_3 = clamp(&mul(&r_3, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
@@ -230,18 +215,6 @@ fn composite(
 
     return (index, matte);
 }
-
-
-fn save_webp(path: PathBuf, size: u32, pixels: &Vec<u8>, compression: WebpCompressionType) {
-    let img = match compression {
-        WebpCompressionType::LOSSLESS => webp::Encoder::from_rgb(pixels, size, size).encode_lossless(),
-        WebpCompressionType::LOSSY(quality) => webp::Encoder::from_rgb(pixels, size, size).encode(quality),
-    };
-    let _ = fs::create_dir_all(path.clone().parent().unwrap());
-    let mut buffered_file_write = BufWriter::new(fs::File::create(path).unwrap());
-    buffered_file_write.write_all(&img).unwrap();
-}
-
 
 fn main() {
     let args = CliArgs::parse();

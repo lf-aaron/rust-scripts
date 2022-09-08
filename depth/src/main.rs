@@ -1,11 +1,10 @@
 use arrayfire::*;
 use clap::Parser;
 use exr::prelude::*;
-use std::io::{BufWriter, Write};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::ops::{Not};
-use webp;
+use util::{WebpCompressionType, save_webp};
 
 
 #[derive(Parser, Debug)]
@@ -127,14 +126,6 @@ fn depth_mask(frame: usize, z_front: &Vec<f32>, z_rear: &Vec<f32>, z_upper: &Vec
     return buffer;
 }
 
-
-fn save_webp(path: PathBuf, size: u32, pixels: &Vec<u8>) {
-    let img = webp::Encoder::from_rgb(pixels, size, size).encode_lossless();
-    let _ = fs::create_dir_all(path.clone().parent().unwrap());
-    let mut buffered_file_write = BufWriter::new(fs::File::create(path).unwrap());
-    buffered_file_write.write_all(&img).unwrap();
-}
-
 fn main() {
     let args: CliArgs = CliArgs::parse();
     
@@ -189,7 +180,7 @@ fn main() {
 
         let zmask = depth_mask(frame, &z_front, &z_rear, &z_upper, &z_plane, size as u64);
 
-        save_webp(path_out, size, &zmask);
+        save_webp(path_out, size, &zmask, WebpCompressionType::LOSSLESS);
     }
 
 }

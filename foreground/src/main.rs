@@ -1,11 +1,10 @@
 use arrayfire::*;
 use clap::Parser;
-use image::{EncodableLayout};
-use std::io::{BufWriter, Write};
-use std::fs;
-use std::path::{Path, PathBuf};
 use exr::prelude::*;
-use webp;
+use image::{EncodableLayout};
+use std::fs::{DirEntry, read_dir};
+use std::path::{Path, PathBuf};
+use util::{RGBAChannel, WebpCompressionType, save_webp};
 
 
 struct ForegroundStruct {
@@ -21,21 +20,6 @@ enum ForegroundPass {
     DIFFUSE,
     GLOSSY,
 }
-
-#[derive(Debug)]
-enum RGBAChannel {
-    R,
-    G,
-    B,
-    A,
-}
-
-#[derive(Debug)]
-enum WebpCompressionType {
-    LOSSY(f32),
-    LOSSLESS,
-}
-
 
 fn num_channels(pass: ForegroundPass) -> usize {
     match pass {
@@ -242,18 +226,6 @@ fn composite(
     return light;
 }
 
-
-fn save_webp(path: PathBuf, size: u32, pixels: &Vec<u8>, compression: WebpCompressionType) {
-    let img = match compression {
-        WebpCompressionType::LOSSLESS => webp::Encoder::from_rgb(pixels, size, size).encode_lossless(),
-        WebpCompressionType::LOSSY(quality) => webp::Encoder::from_rgb(pixels, size, size).encode(quality),
-    };
-    let _ = fs::create_dir_all(path.clone().parent().unwrap());
-    let mut buffered_file_write = BufWriter::new(fs::File::create(path).unwrap());
-    buffered_file_write.write_all(&img).unwrap();
-}
-
-
 fn main() {
     let args = CliArgs::parse();
     
@@ -269,10 +241,10 @@ fn main() {
     set_backend(Backend::CUDA);
     set_device(device);
 
-    let mut front_files = fs::read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let mut rear_files = fs::read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let mut upper_files = fs::read_dir(upper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
-    let mut zmask_files = fs::read_dir(zmask_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let mut front_files = read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
+    let mut rear_files = read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
+    let mut upper_files = read_dir(upper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
+    let mut zmask_files = read_dir(zmask_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
 
     let num_frames = 144;
     if front_files.len() != num_frames { panic!("Missing 'Front' files"); }
