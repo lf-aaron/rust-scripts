@@ -45,7 +45,6 @@ impl MatteStruct {
 
         match pass {
             MattePass::INDEX => { self.index.splice(offset..offset+n, unsafe { channel_data.into_iter().map(|x| {transmute::<f32, u32>(x)}).collect::<Vec<u32>>()}); },
-            // MattePass::INDEX => { self.index.splice(offset..offset+n, unsafe { transmute::<Vec<f32>, Vec<u32>>(channel_data) }); },
             MattePass::MATTE => { self.matte.splice(offset..offset+n, channel_data); },
         };
     }
@@ -78,9 +77,7 @@ struct CliArgs {
 
 fn get_index_map() -> [(u32, f32); 32] {
     [
-        (0, 0.0),
-        // (0, -1.1562982805507717e+33), // Mag shell
-        (0, 46.93645477294922),       // NONE
+        (0, 46.93645477294922), // VOID
         (1, -0.03498752787709236),
         (2, -7.442164937651292e-35),
         (3, -6.816108887753408e+29),
@@ -111,10 +108,8 @@ fn get_index_map() -> [(u32, f32); 32] {
         (28, 1.5731503249895985e+26),
         (29, 1.4262572893553038e-11),
         (30, -84473296.0),
+        (31, 0.0), // NONE
     ]
-
-    // HashMap::from(array.map(|v | { ( unsafe { transmute::<f32, u32>(v.1) }, v.0) }))
-
 }
 
 
