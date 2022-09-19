@@ -9,35 +9,22 @@ use std::path::{Path, PathBuf};
 use util::{RGBAChannel, WebpCompressionType, save_webp};
 
 
-struct ForegroundStruct {
+struct MetalStruct {
     resolution: usize,
-    ao: Vec<f32>,
-    diffuse: Vec<f32>,
     glossy: Vec<f32>,
 }
 
-#[derive(Debug)]
-enum ForegroundPass {
-    AO,
-    DIFFUSE,
-    GLOSSY,
-}
 
-fn num_channels(pass: ForegroundPass) -> usize {
-    match pass {
-        ForegroundPass::AO => 3,
-        ForegroundPass::DIFFUSE => 3,
-        ForegroundPass::GLOSSY => 3,
-    }
-}
-
-
-fn preload(base_resolution: u32, level: u32, frame: u32, foreground_dir: &Path) -> (HashMap<&str, ForegroundStruct>, HashMap<&str, ForegroundStruct>, HashMap<&str, ForegroundStruct>) {
+fn preload<'a>(base_resolution: u32, level: u32, frame: u32, raw_dir: &'a Path, polish_dir: &'a Path) -> (HashMap<&'a str, MetalStruct>, HashMap<&'a str, MetalStruct>, HashMap<&'a str, MetalStruct>, HashMap<&'a str, MetalStruct>, HashMap<&'a str, MetalStruct>, HashMap<&'a str, MetalStruct>) {
     let resolution = base_resolution * 2_u32.pow(level);
     
-    let mut front_map: HashMap<&str, ForegroundStruct> = HashMap::new();
-    let mut rear_map: HashMap<&str, ForegroundStruct> = HashMap::new();
-    let mut upper_map: HashMap<&str, ForegroundStruct> = HashMap::new();
+    let mut front_map_raw: HashMap<&str, MetalStruct> = HashMap::new();
+    let mut rear_map_raw: HashMap<&str, MetalStruct> = HashMap::new();
+    let mut upper_map_raw: HashMap<&str, MetalStruct> = HashMap::new();
+
+    let mut front_map_polish: HashMap<&str, MetalStruct> = HashMap::new();
+    let mut rear_map_polish: HashMap<&str, MetalStruct> = HashMap::new();
+    let mut upper_map_polish: HashMap<&str, MetalStruct> = HashMap::new();
 
     let front_configs = vec![
         "Front Std Com",
@@ -93,27 +80,36 @@ fn preload(base_resolution: u32, level: u32, frame: u32, foreground_dir: &Path) 
     ];
 
     for config in front_configs {
-        let path = foreground_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("exr");
-        // println!("{:?} -> {:?}", path, path.exists());
-        front_map.insert(config, read_foreground_exr(&path, resolution));
-        // front_map.insert(config, ForegroundStruct::new(0));
+        let path = format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string());
+        let path_raw = raw_dir.join(&path).with_extension("exr");
+        let path_polish = polish_dir.join(&path).with_extension("exr");
+        println!("{:?} -> {:?}", path_raw, path_raw.exists());
+        println!("{:?} -> {:?}", path_polish, path_polish.exists());
+        front_map_raw.insert(config, read_metal_exr(&path_raw, resolution));
+        front_map_polish.insert(config, read_metal_exr(&path_polish, resolution));
     }
 
     for config in rear_configs {
-        let path = foreground_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("exr");
-        // println!("{:?} -> {:?}", path, path.exists());
-        rear_map.insert(config, read_foreground_exr(&path, resolution));
-        // rear_map.insert(config, ForegroundStruct::new(0));
+        let path = format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string());
+        let path_raw = raw_dir.join(&path).with_extension("exr");
+        let path_polish = polish_dir.join(&path).with_extension("exr");
+        println!("{:?} -> {:?}", path_raw, path_raw.exists());
+        println!("{:?} -> {:?}", path_polish, path_polish.exists());
+        rear_map_raw.insert(config, read_metal_exr(&path_raw, resolution));
+        rear_map_polish.insert(config, read_metal_exr(&path_polish, resolution));
     }
 
     for config in upper_configs {
-        let path = foreground_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("exr");
-        // println!("{:?} -> {:?}", path, path.exists());
-        upper_map.insert(config, read_foreground_exr(&path, resolution));
-        // upper_map.insert(config, ForegroundStruct::new(0));
+        let path = format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string());
+        let path_raw = raw_dir.join(&path).with_extension("exr");
+        let path_polish = polish_dir.join(&path).with_extension("exr");
+        println!("{:?} -> {:?}", path_raw, path_raw.exists());
+        println!("{:?} -> {:?}", path_polish, path_polish.exists());
+        upper_map_raw.insert(config, read_metal_exr(&path_raw, resolution));
+        upper_map_polish.insert(config, read_metal_exr(&path_polish, resolution));
     }
 
-   (front_map, rear_map, upper_map)
+   (front_map_raw, rear_map_raw, upper_map_raw, front_map_polish, rear_map_polish, upper_map_polish)
 }
 
 
@@ -162,19 +158,17 @@ fn get_configurations(configs: &mut Vec<(String, String, String, String)>, optio
 }
 
 
-impl ForegroundStruct {
+impl MetalStruct {
     fn new (resolution: usize) -> Self {
         let n = resolution * resolution;
         Self {
             resolution,
-            ao: vec![0_f32; n * num_channels(ForegroundPass::AO)],
-            diffuse: vec![0_f32; n * num_channels(ForegroundPass::DIFFUSE)],
-            glossy: vec![0_f32; n * num_channels(ForegroundPass::GLOSSY)],
+            glossy: vec![0_f32; n * 3],
         }
     }
 
     
-    fn set_channel(&mut self, channel_data: Vec<f32>, pass: ForegroundPass, channel: RGBAChannel) {
+    fn set_channel(&mut self, channel_data: Vec<f32>, channel: RGBAChannel) {
         
         let n = self.resolution * self.resolution;
         if channel_data.len() != n {
@@ -188,11 +182,7 @@ impl ForegroundStruct {
             RGBAChannel::A => 3,
         };
 
-        match pass {
-            ForegroundPass::AO => { self.ao.splice(offset..offset+n, channel_data); },
-            ForegroundPass::DIFFUSE => { self.diffuse.splice(offset..offset+n, channel_data); },
-            ForegroundPass::GLOSSY => { self.glossy.splice(offset..offset+n, channel_data); },
-        };
+        self.glossy.splice(offset..offset+n, channel_data);
     }
 }
 
@@ -211,13 +201,16 @@ struct CliArgs {
     frame: u32,
 
     #[clap(long, parse(from_os_str))]
-    foreground: PathBuf,
+    raw: PathBuf,
+
+    #[clap(long, parse(from_os_str))]
+    polish: PathBuf,
 
     #[clap(long, parse(from_os_str))]
     zmask: PathBuf,
 
     #[clap(long, parse(from_os_str))]
-    light: PathBuf,
+    metal: PathBuf,
 
     #[clap(long)]
     device: i32,
@@ -227,16 +220,12 @@ struct CliArgs {
 }
 
 
-fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
+fn read_metal_exr(path: &Path, resolution: u32) -> MetalStruct {
 
-    // There are 21 channels in total.
+    // There are 7 channels in total.
     // Colors organized as (A, B, G, R), but some channels (AO, Diffuse, Glossy) do not contain alpha
-    // 1) AO
-    // 2) Combined
-    // 3) Crypto00
-    // 4) Crypto01
-    // 5) Diffuse
-    // 6) Glossy
+    // 1) Combined
+    // 2) Glossy
     let channels = exr::prelude::read()
         .no_deep_data()
         .largest_resolution_level()
@@ -249,7 +238,7 @@ fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
         .channel_data
         .list;
 
-    let mut obj = ForegroundStruct::new(resolution as usize);
+    let mut obj = MetalStruct::new(resolution as usize);
 
     let f = |ch: &AnyChannel<FlatSamples>| {
         match &ch.sample_data {
@@ -260,27 +249,9 @@ fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
     
     for (i, _) in channels.iter().enumerate() {
         match i {
-            0 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::B),        // AO.B
-            1 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::G),        // AO.G
-            2 => obj.set_channel(f(&channels[i]), ForegroundPass::AO, RGBAChannel::R),        // AO.R
-            // 3                                                                              // Combined.A
-            // 4                                                                              // Combined.B
-            // 5                                                                              // Combined.G
-            // 6                                                                              // Combined.R
-            // 7                                                                              // Crypto00.A
-            // 8                                                                              // Crypto00.B
-            // 9                                                                              // Crypto00.G
-            // 10                                                                             // Crypto00.R
-            // 11                                                                             // Crypto01.A
-            // 12                                                                             // Crypto01.B
-            // 13                                                                             // Crypto01.G
-            // 14                                                                             // Crypto01.R
-            15 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::B),  // Diffuse.B
-            16 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::G),  // Diffuse.G
-            17 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::R),  // Diffuse.R
-            18 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::B),   // Glossy.B
-            19 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::G),   // Glossy.G
-            20 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::R),   // Glossy.R
+            4 => obj.set_channel(f(&channels[i]), RGBAChannel::B),        // AO.B
+            5 => obj.set_channel(f(&channels[i]), RGBAChannel::G),        // AO.G
+            6 => obj.set_channel(f(&channels[i]), RGBAChannel::R),        // AO.R
             _ => {},
         };
     }
@@ -290,16 +261,19 @@ fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
 
 
 fn composite(
-    front: &ForegroundStruct,
-    rear: &ForegroundStruct,
-    upper: &ForegroundStruct,
+    front_raw: &MetalStruct,
+    rear_raw: &MetalStruct,
+    upper_raw: &MetalStruct,
+    front_polish: &MetalStruct,
+    rear_polish: &MetalStruct,
+    upper_polish: &MetalStruct,
     zmask: &Vec<u8>,
     size: u64,
 ) -> Vec<u8> {
     
     let dims = dim4!(size, size, 3);
 
-    let mut light = vec!(0; dims.elements() as usize);
+    let mut metal = vec!(0; dims.elements() as usize);
 
     let mut a_zmask = Array::new(zmask, dim4!(3, size, size)).cast::<bool>();
     a_zmask = reorder_v2(&a_zmask, 1, 2, Some(vec![0]));
@@ -309,53 +283,43 @@ fn composite(
     let m_rear = view!(a_zmask[1:1:0, 1:1:0, 1:1:1]);
     let m_upper = view!(a_zmask[1:1:0, 1:1:0, 2:2:1]);
 
-    let a_front_ao = Array::new(&front.ao, dims);
-    let a_rear_ao = Array::new(&rear.ao, dims);
-    let a_upper_ao = Array::new(&upper.ao, dims);
-    
-    let a_front_diffuse = Array::new(&front.diffuse, dims);
-    let a_rear_diffuse = Array::new(&rear.diffuse, dims);
-    let a_upper_diffuse = Array::new(&upper.diffuse, dims);
-    
-    let a_front_glossy = Array::new(&front.glossy, dims);
-    let a_rear_glossy = Array::new(&rear.glossy, dims);
-    let a_upper_glossy = Array::new(&upper.glossy, dims);
-    
-    let mut a_ao = constant::<f32>(0_f32, dims);
-    let mut a_diffuse = constant::<f32>(0_f32, dims);
-    let mut a_glossy = constant::<f32>(0_f32, dims);
+    let a_front_raw = Array::new(&front_raw.glossy, dims);
+    let a_rear_raw = Array::new(&rear_raw.glossy, dims);
+    let a_upper_raw = Array::new(&upper_raw.glossy, dims);
 
-    a_ao = select(&a_front_ao, &m_front, &a_ao);
-    a_ao = select(&a_rear_ao, &m_rear, &a_ao);
-    a_ao = select(&a_upper_ao, &m_upper, &a_ao);
+    let a_front_polish = Array::new(&front_polish.glossy, dims);
+    let a_rear_polish = Array::new(&rear_polish.glossy, dims);
+    let a_upper_polish = Array::new(&upper_polish.glossy, dims);
+    
+    let mut a_raw = constant::<f32>(0_f32, dims);
+    let mut a_polish = constant::<f32>(0_f32, dims);
 
-    a_diffuse = select(&a_front_diffuse, &m_front, &a_diffuse);
-    a_diffuse = select(&a_rear_diffuse, &m_rear, &a_diffuse);
-    a_diffuse = select(&a_upper_diffuse, &m_upper, &a_diffuse);
+    a_raw = select(&a_front_raw, &m_front, &a_raw);
+    a_raw = select(&a_rear_raw, &m_rear, &a_raw);
+    a_raw = select(&a_upper_raw, &m_upper, &a_raw);
 
-    a_glossy = select(&a_front_glossy, &m_front, &a_glossy);
-    a_glossy = select(&a_rear_glossy, &m_rear, &a_glossy);
-    a_glossy = select(&a_upper_glossy, &m_upper, &a_glossy);
+    a_polish = select(&a_front_polish, &m_front, &a_polish);
+    a_polish = select(&a_rear_polish, &m_rear, &a_polish);
+    a_polish = select(&a_upper_polish, &m_upper, &a_polish);
     
     let luma = Array::new(&[0.2126_f32, 0.7152_f32, 0.0722_f32], dim4!(1, 1, 3));
 
-    a_ao = mul(&a_ao, &luma, true);
-    a_diffuse = mul(&a_diffuse, &luma, true);
-    a_glossy = mul(&a_glossy, &luma, true);
+    a_raw = mul(&a_raw, &luma, true);
+    a_polish = mul(&a_polish, &luma, true);
 
-    a_ao = sum(&a_ao, 2);
-    a_diffuse = sum(&a_diffuse, 2);
-    a_glossy = sum(&a_glossy, 2);
+    a_raw = sum(&a_raw, 2);
+    a_polish = sum(&a_polish, 2);
 
-    let mut a_light = join_many![2; &a_diffuse, &a_glossy, &a_ao];
-    a_light = log2(&a_light);
-    a_light = add(&a_light, &(12.473931188_f32), true);
-    a_light = mul(&a_light, &(0.04_f32 * 2_f32 * 255_f32), true);
-    a_light = clamp(&a_light, &(0_f32), &(255_f32), true);
-    a_light = reorder_v2(&a_light, 2, 0, Some(vec![1]));
-    a_light.cast::<u8>().host::<u8>(&mut light);
+    let temp = constant::<f32>(0_f32, dim4!(size, size, 1));
+    let mut a_metal = join_many![2; &a_raw, &a_polish, &temp];
+    a_metal = log2(&a_metal);
+    a_metal = add(&a_metal, &(12.473931188_f32), true);
+    a_metal = mul(&a_metal, &(0.04_f32 * 2_f32 * 255_f32), true);
+    a_metal = clamp(&a_metal, &(0_f32), &(255_f32), true);
+    a_metal = reorder_v2(&a_metal, 2, 0, Some(vec![1]));
+    a_metal.cast::<u8>().host::<u8>(&mut metal);
 
-    return light;
+    return metal;
 }
 
 fn main() {
@@ -365,9 +329,10 @@ fn main() {
     let frame = args.frame;
     let level = args.level;
     let base_resolution = args.base_resolution;
-    let foreground_dir = args.foreground;
+    let raw_dir = args.raw;
+    let polish_dir = args.polish;
     let zmask_dir = args.zmask;
-    let light_dir = &args.light;
+    let metal_dir = &args.metal;
     let device = args.device;
     let overwrite = args.overwrite;
 
@@ -390,10 +355,10 @@ fn main() {
     };
 
     get_configurations(&mut configs, options);
-    let (front_map, rear_map, upper_map) = preload(base_resolution, level, frame, &foreground_dir);
+    let (front_map_raw, rear_map_raw, upper_map_raw, front_map_polish, rear_map_polish, upper_map_polish) = preload(base_resolution, level, frame, &raw_dir, &polish_dir);
 
     for (config, front, rear, upper) in configs {
-        let path_out = light_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
+        let path_out = metal_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
         // println!("LIGHT PATH: {:?}", path_out);
         if !overwrite && path_out.exists() {
             continue;
@@ -407,21 +372,27 @@ fn main() {
         let zmask_path = zmask_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
         // println!("ZMASK PATH: {:?}", zmask_path);
 
-        let front_exr = front_map.get(front.as_str()).unwrap();
-        let rear_exr = rear_map.get(rear.as_str()).unwrap();
-        let upper_exr = upper_map.get(upper.as_str()).unwrap();
+        let front_exr_raw = front_map_raw.get(front.as_str()).unwrap();
+        let rear_exr_raw = rear_map_raw.get(rear.as_str()).unwrap();
+        let upper_exr_raw = upper_map_raw.get(upper.as_str()).unwrap();
+        let front_exr_polish = front_map_polish.get(front.as_str()).unwrap();
+        let rear_exr_polish = rear_map_polish.get(rear.as_str()).unwrap();
+        let upper_exr_polish = upper_map_polish.get(upper.as_str()).unwrap();
 
         let zmask = image::open(zmask_path).unwrap().to_rgb8().as_bytes().to_vec();
 
-        let light = composite(
-            front_exr,
-            rear_exr,
-            upper_exr,
+        let metal = composite(
+            front_exr_raw,
+            rear_exr_raw,
+            upper_exr_raw,
+            front_exr_polish,
+            rear_exr_polish,
+            upper_exr_polish,
             &zmask,
             resolution as u64,
         );
 
-        save_webp(path_out, resolution, &light, WebpCompressionType::LOSSLESS);
+        save_webp(path_out, resolution, &metal, WebpCompressionType::LOSSLESS);
     }
 
     // let mut front_files = read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();

@@ -5,6 +5,7 @@ members = [
   "depth",
   "foreground",
   "matte",
+  "metal",
   "test",
   "util"
 ]
