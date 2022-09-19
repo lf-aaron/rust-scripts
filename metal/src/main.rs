@@ -4,7 +4,6 @@ use exr::prelude::*;
 use image::{EncodableLayout};
 use std::collections::HashMap;
 use std::fs;
-// use std::fs::{DirEntry, read_dir};
 use std::path::{Path, PathBuf};
 use util::{RGBAChannel, WebpCompressionType, save_webp};
 
@@ -359,7 +358,6 @@ fn main() {
 
     for (config, front, rear, upper) in configs {
         let path_out = metal_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
-        // println!("LIGHT PATH: {:?}", path_out);
         if !overwrite && path_out.exists() {
             continue;
         }
@@ -370,7 +368,6 @@ fn main() {
         }
 
         let zmask_path = zmask_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
-        // println!("ZMASK PATH: {:?}", zmask_path);
 
         let front_exr_raw = front_map_raw.get(front.as_str()).unwrap();
         let rear_exr_raw = rear_map_raw.get(rear.as_str()).unwrap();
@@ -394,48 +391,4 @@ fn main() {
 
         save_webp(path_out, resolution, &metal, WebpCompressionType::LOSSLESS);
     }
-
-    // let mut front_files = read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-    // let mut rear_files = read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-    // let mut upper_files = read_dir(upper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-    // let mut zmask_files = read_dir(zmask_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-
-    // let num_frames = 144;
-    // if front_files.len() != num_frames { panic!("Missing 'Front' files"); }
-    // if rear_files.len() != num_frames { panic!("Missing 'Rear' files"); }
-    // if upper_files.len() != num_frames { panic!("Missing 'Upper' files"); }
-    // if zmask_files.len() != num_frames { panic!("Missing 'ZMask' files"); }
-
-    // front_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    // rear_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    // upper_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    // zmask_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    
-    // for frame in 0..num_frames {
-    //     let path_out = light_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
-    //     if !overwrite && path_out.exists() {
-    //         continue;
-    //     }
-
-    //     let f_front = &front_files[frame];
-    //     let f_rear = &rear_files[frame];
-    //     let f_upper = &upper_files[frame];
-    //     let f_zmask = &zmask_files[frame];
-
-    //     let front = read_foreground_exr(&f_front.path(), size);
-    //     let rear = read_foreground_exr(&f_rear.path(), size);
-    //     let upper = read_foreground_exr(&f_upper.path(), size);
-    //     let zmask = image::open(f_zmask.path()).unwrap().to_rgb8().as_bytes().to_vec();
-
-    //     let light = composite(
-    //         front,
-    //         rear,
-    //         upper,
-    //         &zmask,
-    //         size as u64,
-    //     );
-
-    //     save_webp(path_out, size, &light, WebpCompressionType::LOSSLESS);
-    //     // save_webp(path_out, size, &light, WebpCompressionType::LOSSY(100.0));
-    // }
 }
