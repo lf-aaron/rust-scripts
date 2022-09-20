@@ -172,9 +172,10 @@ fn composite(
     let mut matte = vec!(0; dim3.elements() as usize);
 
     // Map index values
-    let mut a_index = Array::new(&exr.index, dim4);
+    let a_index_copy = Array::new(&exr.index, dim4);
+    let mut a_index = constant(0_u32, dim4);
     for (k, v) in arr {
-        let cond = eq(&a_index, &constant(unsafe { transmute::<f32, u32>(*v) }, dim4), false);
+        let cond = eq(&a_index_copy, &constant(unsafe { transmute::<f32, u32>(*v) }, dim4), false);
         replace(&mut a_index, &cond.not(), &constant(*k, dim4));
     }
     
