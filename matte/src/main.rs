@@ -1,5 +1,7 @@
 use arrayfire::*;
 use clap::Parser;
+use image::EncodableLayout;
+use std::collections::HashMap;
 use std::fs;
 use std::mem::{transmute};
 use std::ops::{Not, Shl, Shr};
@@ -51,15 +53,151 @@ impl MatteStruct {
 }
 
 
+fn preload(base_resolution: u32, level: u32, frame: u32, input_dir: &Path) -> (HashMap<&str, MatteStruct>, HashMap<&str, MatteStruct>, HashMap<&str, MatteStruct>) {
+    let resolution = base_resolution * 2_u32.pow(level);
+    
+    let mut front_map: HashMap<&str, MatteStruct> = HashMap::new();
+    let mut rear_map: HashMap<&str, MatteStruct> = HashMap::new();
+    let mut upper_map: HashMap<&str, MatteStruct> = HashMap::new();
+
+    let front_configs = vec![
+        "Front Std Com",
+        "Front Std Com Ext",
+        "Front Std Gov",
+        "Front Std Gov Ext",
+        "Front Std Sqr Com",
+        "Front Std Sqr Com Ext",
+        "Front Std Sqr Gov",
+        "Front Std Sqr Gov Ext",
+        "Front Tac Com",
+        "Front Tac Com Ext",
+        "Front Tac Gov",
+        "Front Tac Gov Ext",
+        "Front Tac Sqr Com",
+        "Front Tac Sqr Com Ext",
+        "Front Tac Sqr Gov",
+        "Front Tac Sqr Gov Ext",
+    ];
+
+    let rear_configs = vec![
+        "Rear 9mm",
+        "Rear 9mm Bob",
+        "Rear 9mm Bob FChk",
+        "Rear 9mm Bob RChk",
+        "Rear 9mm Bob RChk FChk",
+        "Rear 9mm FChk",
+        "Rear 9mm RChk",
+        "Rear 9mm RChk FChk",
+    ];
+
+    let upper_configs = vec![
+        "Upper .45 Com Novak",
+        "Upper .45 Com Ext Novak",
+        "Upper .45 Gov Novak",
+        "Upper .45 Gov Ext Novak",
+        "Upper 9mm Com Novak",
+        "Upper 9mm Com Ext Novak",
+        "Upper 9mm Gov Novak",
+        "Upper 9mm Gov Ext Novak",
+        "Upper 10mm Com Novak",
+        "Upper 10mm Com Ext Novak",
+        "Upper 10mm Gov Novak",
+        "Upper 10mm Gov Ext Novak",
+        "Upper .38 Com Novak",
+        "Upper .38 Com Ext Novak",
+        "Upper .38 Gov Novak",
+        "Upper .38 Gov Ext Novak",
+        "Upper .40 Com Novak",
+        "Upper .40 Com Ext Novak",
+        "Upper .40 Gov Novak",
+        "Upper .40 Gov Ext Novak",
+    ];
+
+    for config in front_configs {
+        let path = input_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("exr");
+        // println!("{:?} -> {:?}", path, path.exists());
+        front_map.insert(config, read_matte_exr(&path, resolution));
+    }
+
+    for config in rear_configs {
+        let path = input_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("exr");
+        // println!("{:?} -> {:?}", path, path.exists());
+        rear_map.insert(config, read_matte_exr(&path, resolution));
+    }
+
+    for config in upper_configs {
+        let path = input_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("exr");
+        // println!("{:?} -> {:?}", path, path.exists());
+        upper_map.insert(config, read_matte_exr(&path, resolution));
+    }
+
+   (front_map, rear_map, upper_map)
+}
+
+struct ConfigOptions<'a> {
+    style: Vec<&'a str>,
+    guard: Vec<&'a str>,
+    caliber: Vec<&'a str>,
+    size: Vec<&'a str>,
+    ext: Vec<&'a str>,
+    rear: Vec<&'a str>,
+    rchk: Vec<&'a str>,
+    fchk: Vec<&'a str>,
+}
+
+
+fn get_name<'a>(v: Vec<&&'a str>) -> String {
+    v.into_iter().map(|x| {x.to_owned()}).filter(|x| {!x.is_empty()}).collect::<Vec<&str>>().join(" ").trim_end().to_string()
+}
+
+
+fn get_configurations(configs: &mut Vec<(String, String, String, String)>, options: ConfigOptions) {
+    let trig = "";
+    let sight = "Novak";
+    for style in &options.style {
+        for guard in &options.guard {
+            for caliber in &options.caliber {
+                for size in &options.size {
+                    for ext in &options.ext {
+                        for rear in &options.rear {
+                            for rchk in &options.rchk {
+                                for fchk in &options.fchk {
+                                    configs.push((
+                                        get_name(vec![style, guard, caliber, size, ext, rear, rchk, fchk]),
+                                        get_name(vec![&"Front", style, guard, size, ext]),
+                                        get_name(vec![&"Rear", &"9mm", rear, rchk, fchk, &trig]),
+                                        get_name(vec![&"Upper", caliber, size, ext, &sight]),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CliArgs {
 
     #[clap(long)]
-    resolution: u32,
+    level: u32,
+
+    #[clap(long)]
+    base_resolution: u32,
+
+    #[clap(long)]
+    
+    frame: u32,
 
     #[clap(long, parse(from_os_str))]
     input: PathBuf,
+
+    #[clap(long, parse(from_os_str))]
+    zmask: PathBuf,
 
     #[clap(long, parse(from_os_str))]
     index: PathBuf,
@@ -143,6 +281,10 @@ fn read_matte_exr(path: &Path, resolution: u32) -> MatteStruct {
     
     for (i, _) in channels.iter().enumerate() {
         match i {
+            // 0                                                                        // Combined.A
+            // 1                                                                        // Combined.B
+            // 2                                                                        // Combined.G
+            // 3                                                                        // Combined.R
             4 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::G),    // Crypto00.A
             5 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::G),    // Crypto00.B
             6 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::R),    // Crypto00.G
@@ -161,7 +303,10 @@ fn read_matte_exr(path: &Path, resolution: u32) -> MatteStruct {
 
 fn composite(
     arr: &[(u32, f32); 32],
-    exr: MatteStruct,
+    front: &MatteStruct,
+    rear: &MatteStruct,
+    upper: &MatteStruct,
+    zmask: &Vec<u8>,
     size: u64,
 ) -> (Vec<u8>, Vec<u8>) {
     
@@ -171,9 +316,36 @@ fn composite(
     let mut index = vec!(0; dim3.elements() as usize);
     let mut matte = vec!(0; dim3.elements() as usize);
 
+    // Combine sections using zmask
+    let mut a_zmask = Array::new(zmask, dim4!(3, size, size)).cast::<bool>();
+    a_zmask = reorder_v2(&a_zmask, 1, 2, Some(vec![0]));
+
+    // NOTE: `1:1:0` means all elements along axis
+    let m_front = view!(a_zmask[1:1:0, 1:1:0, 0:0:1]);
+    let m_rear = view!(a_zmask[1:1:0, 1:1:0, 1:1:1]);
+    let m_upper = view!(a_zmask[1:1:0, 1:1:0, 2:2:1]);
+
+    let a_front_index = Array::new(&front.index, dim4);
+    let a_rear_index = Array::new(&rear.index, dim4);
+    let a_upper_index = Array::new(&upper.index, dim4);
+    
+    let a_front_matte = Array::new(&front.matte, dim4);
+    let a_rear_matte = Array::new(&rear.matte, dim4);
+    let a_upper_matte = Array::new(&upper.matte, dim4);
+
+    let mut a_index = constant::<u32>(0_u32, dim4);
+    let mut a_matte = constant::<f32>(0_f32, dim4);
+
+    a_index = select(&a_front_index, &m_front, &a_index);
+    a_index = select(&a_rear_index, &m_rear, &a_index);
+    a_index = select(&a_upper_index, &m_upper, &a_index);
+
+    a_matte = select(&a_front_matte, &m_front, &a_matte);
+    a_matte = select(&a_rear_matte, &m_rear, &a_matte);
+    a_matte = select(&a_upper_matte, &m_upper, &a_matte);
+
     // Map index values
-    let a_index_copy = Array::new(&exr.index, dim4);
-    let mut a_index = constant(0_u32, dim4);
+    let a_index_copy = a_index.copy();
     for (k, v) in arr {
         let cond = eq(&a_index_copy, &constant(unsafe { transmute::<f32, u32>(*v) }, dim4), false);
         replace(&mut a_index, &cond.not(), &constant(*k, dim4));
@@ -196,7 +368,6 @@ fn composite(
 
 
     // Matte
-    let mut a_matte = Array::new(&exr.matte, dim4);
     let mut r_1 = view!(a_matte[1:1:0, 1:1:0, 1:1:1]);
     let mut r_2 = view!(a_matte[1:1:0, 1:1:0, 2:2:1]);
     let mut r_3 = view!(a_matte[1:1:0, 1:1:0, 3:3:1]);
@@ -215,41 +386,69 @@ fn composite(
 fn main() {
     let args = CliArgs::parse();
     
-    let size = args.resolution;
-    let in_dir = &args.input;
-    let matte_dir = &args.matte;
+    let frame = args.frame;
+    let level = args.level;
+    let base_resolution = args.base_resolution;
+    let input_dir = args.input;
+    let zmask_dir = args.zmask;
     let index_dir = &args.index;
+    let matte_dir = &args.matte;
     let device = args.device;
     let overwrite = args.overwrite;
 
     set_backend(Backend::CUDA);
     set_device(device);
 
-    let mut in_files = fs::read_dir(in_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<fs::DirEntry>>();
+    let resolution = base_resolution * 2_u32.pow(level);
 
-    let num_frames = 144;
-    if in_files.len() != num_frames {
-        eprintln!("Missing files: {:}", in_dir.to_str().unwrap());
-        std::process::exit(1);
-    }
+    let mut configs: Vec<(String, String, String, String)> = Vec::new();
 
-    in_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
+    let options = ConfigOptions  {
+        style: vec!["Std", "Tac"],
+        guard: vec!["", "Sqr"],
+        caliber: vec![".45", "9mm", "10mm", ".38", ".40"],
+        size: vec!["Com", "Gov"],
+        ext: vec!["", "Ext"],
+        rear: vec!["", "Bob"],
+        rchk: vec!["", "RChk"],
+        fchk: vec!["", "FChk"],
+    };
+
+    get_configurations(&mut configs, options);
+    let (front_map, rear_map, upper_map) = preload(base_resolution, level, frame, &input_dir);
 
     let arr = get_index_map();
 
-    for frame in 0..num_frames {
+    for (config, front, rear, upper) in configs {
         let path_out_index = index_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
         let path_out_matte = matte_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
         if !overwrite && path_out_index.exists() && path_out_matte.exists() {
             continue;
         }
-        
-        let f_in = &in_files[frame];
-        let exr = read_matte_exr(&f_in.path(), size);
 
-        let (index, matte) = composite(&arr, exr, size as u64);
+        let index_folder = path_out_index.parent().unwrap();
+        let matte_folder = path_out_matte.parent().unwrap();
+        if !index_folder.exists() { let _ = fs::create_dir_all(index_folder); }
+        if !matte_folder.exists() { let _ = fs::create_dir_all(matte_folder); }
 
-        save_webp(path_out_index, size, &index, WebpCompressionType::LOSSLESS);
-        save_webp(path_out_matte, size, &matte, WebpCompressionType::LOSSLESS);
+        let zmask_path = zmask_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
+
+        let front_exr = front_map.get(front.as_str()).unwrap();
+        let rear_exr = rear_map.get(rear.as_str()).unwrap();
+        let upper_exr = upper_map.get(upper.as_str()).unwrap();
+
+        let zmask = image::open(zmask_path).unwrap().to_rgb8().as_bytes().to_vec();
+
+        let (index, matte) = composite(
+            &arr,
+            front_exr,
+            rear_exr,
+            upper_exr,
+            &zmask,
+            resolution as u64,
+        );
+
+        save_webp(path_out_index, resolution, &index, WebpCompressionType::LOSSLESS);
+        save_webp(path_out_matte, resolution, &matte, WebpCompressionType::LOSSLESS);
     }
 }

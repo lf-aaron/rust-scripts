@@ -229,14 +229,12 @@ struct CliArgs {
 
 fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
 
-    // There are 21 channels in total.
+    // New files should have 13 channels in total.
     // Colors organized as (A, B, G, R), but some channels (AO, Diffuse, Glossy) do not contain alpha
     // 1) AO
     // 2) Combined
-    // 3) Crypto00
-    // 4) Crypto01
-    // 5) Diffuse
-    // 6) Glossy
+    // 3) Diffuse
+    // 4) Glossy
     let channels = exr::prelude::read()
         .no_deep_data()
         .largest_resolution_level()
@@ -267,20 +265,12 @@ fn read_foreground_exr(path: &Path, resolution: u32) -> ForegroundStruct {
             // 4                                                                              // Combined.B
             // 5                                                                              // Combined.G
             // 6                                                                              // Combined.R
-            // 7                                                                              // Crypto00.A
-            // 8                                                                              // Crypto00.B
-            // 9                                                                              // Crypto00.G
-            // 10                                                                             // Crypto00.R
-            // 11                                                                             // Crypto01.A
-            // 12                                                                             // Crypto01.B
-            // 13                                                                             // Crypto01.G
-            // 14                                                                             // Crypto01.R
-            15 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::B),  // Diffuse.B
-            16 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::G),  // Diffuse.G
-            17 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::R),  // Diffuse.R
-            18 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::B),   // Glossy.B
-            19 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::G),   // Glossy.G
-            20 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::R),   // Glossy.R
+            7 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::B),  // Diffuse.B
+            8 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::G),  // Diffuse.G
+            9 => obj.set_channel(f(&channels[i]), ForegroundPass::DIFFUSE, RGBAChannel::R),  // Diffuse.R
+            10 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::B),   // Glossy.B
+            11 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::G),   // Glossy.G
+            12 => obj.set_channel(f(&channels[i]), ForegroundPass::GLOSSY, RGBAChannel::R),   // Glossy.R
             _ => {},
         };
     }
@@ -301,6 +291,7 @@ fn composite(
 
     let mut light = vec!(0; dims.elements() as usize);
 
+    // Combine sections using zmask
     let mut a_zmask = Array::new(zmask, dim4!(3, size, size)).cast::<bool>();
     a_zmask = reorder_v2(&a_zmask, 1, 2, Some(vec![0]));
 
@@ -337,6 +328,7 @@ fn composite(
     a_glossy = select(&a_rear_glossy, &m_rear, &a_glossy);
     a_glossy = select(&a_upper_glossy, &m_upper, &a_glossy);
     
+    // Convert to BW and log color space
     let luma = Array::new(&[0.2126_f32, 0.7152_f32, 0.0722_f32], dim4!(1, 1, 3));
 
     a_ao = mul(&a_ao, &luma, true);
@@ -394,7 +386,6 @@ fn main() {
 
     for (config, front, rear, upper) in configs {
         let path_out = light_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
-        // println!("LIGHT PATH: {:?}", path_out);
         if !overwrite && path_out.exists() {
             continue;
         }
@@ -405,7 +396,6 @@ fn main() {
         }
 
         let zmask_path = zmask_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
-        // println!("ZMASK PATH: {:?}", zmask_path);
 
         let front_exr = front_map.get(front.as_str()).unwrap();
         let rear_exr = rear_map.get(rear.as_str()).unwrap();
@@ -423,48 +413,4 @@ fn main() {
 
         save_webp(path_out, resolution, &light, WebpCompressionType::LOSSLESS);
     }
-
-    // let mut front_files = read_dir(front_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-    // let mut rear_files = read_dir(rear_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-    // let mut upper_files = read_dir(upper_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-    // let mut zmask_files = read_dir(zmask_dir).unwrap().map(|f| f.unwrap()).collect::<Vec<DirEntry>>();
-
-    // let num_frames = 144;
-    // if front_files.len() != num_frames { panic!("Missing 'Front' files"); }
-    // if rear_files.len() != num_frames { panic!("Missing 'Rear' files"); }
-    // if upper_files.len() != num_frames { panic!("Missing 'Upper' files"); }
-    // if zmask_files.len() != num_frames { panic!("Missing 'ZMask' files"); }
-
-    // front_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    // rear_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    // upper_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    // zmask_files.sort_by(|a, b| {a.file_name().cmp(&b.file_name())});
-    
-    // for frame in 0..num_frames {
-    //     let path_out = light_dir.join(format!("{:0>4}", (121 + frame).to_string())).with_extension("webp");
-    //     if !overwrite && path_out.exists() {
-    //         continue;
-    //     }
-
-    //     let f_front = &front_files[frame];
-    //     let f_rear = &rear_files[frame];
-    //     let f_upper = &upper_files[frame];
-    //     let f_zmask = &zmask_files[frame];
-
-    //     let front = read_foreground_exr(&f_front.path(), size);
-    //     let rear = read_foreground_exr(&f_rear.path(), size);
-    //     let upper = read_foreground_exr(&f_upper.path(), size);
-    //     let zmask = image::open(f_zmask.path()).unwrap().to_rgb8().as_bytes().to_vec();
-
-    //     let light = composite(
-    //         front,
-    //         rear,
-    //         upper,
-    //         &zmask,
-    //         size as u64,
-    //     );
-
-    //     save_webp(path_out, size, &light, WebpCompressionType::LOSSLESS);
-    //     // save_webp(path_out, size, &light, WebpCompressionType::LOSSY(100.0));
-    // }
 }
