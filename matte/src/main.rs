@@ -13,12 +13,12 @@ use util::{RGBAChannel, WebpCompressionType, save_webp};
 struct MatteStruct {
     resolution: usize,
     index: Vec<u32>,
-    matte: Vec<f32>,
+    // matte: Vec<f32>,
 }
 
 enum MattePass {
     INDEX,
-    MATTE,
+    // MATTE,
 }
 
 impl MatteStruct {
@@ -27,7 +27,7 @@ impl MatteStruct {
         Self {
             resolution,
             index: vec![0_u32; n * 4],
-            matte: vec![0_f32; n * 4],
+            // matte: vec![0_f32; n * 4],
         }
     }
   
@@ -47,7 +47,7 @@ impl MatteStruct {
 
         match pass {
             MattePass::INDEX => { self.index.splice(offset..offset+n, unsafe { channel_data.into_iter().map(|x| {transmute::<f32, u32>(x)}).collect::<Vec<u32>>()}); },
-            MattePass::MATTE => { self.matte.splice(offset..offset+n, channel_data); },
+            // MattePass::MATTE => { self.matte.splice(offset..offset+n, channel_data); },
         };
     }
 }
@@ -215,12 +215,12 @@ struct CliArgs {
 
 fn get_index_map() -> [(u32, f32); 32] {
     [
-        (0, 46.93645477294922), // VOID
-        (1, -0.03498752787709236),
-        (2, -7.442164937651292e-35),
-        (3, -6.816108887753408e+29),
-        (4, 0.00035458870115689933),
-        (5, -2.1174496448267268e-37),
+        (0, 0.0), // NONE
+        (1, 46.93645477294922), // VOID
+        (2, -0.03498752787709236),
+        (3, -7.442164937651292e-35),
+        (4, -6.816108887753408e+29),
+        (5, 0.00035458870115689933),
         (6, 1.4020313126302311e+32),
         (7, -1.0356748461253123e-29),
         (8, -2.9085143335341026e+36),
@@ -246,7 +246,7 @@ fn get_index_map() -> [(u32, f32); 32] {
         (28, 1.5731503249895985e+26),
         (29, 1.4262572893553038e-11),
         (30, -84473296.0),
-        (31, 0.0), // NONE
+        (31, -2.1174496448267268e-37), // MAG BASE PLATE
     ]
 }
 
@@ -285,13 +285,13 @@ fn read_matte_exr(path: &Path, resolution: u32) -> MatteStruct {
             // 1                                                                        // Combined.B
             // 2                                                                        // Combined.G
             // 3                                                                        // Combined.R
-            4 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::G),    // Crypto00.A
+            // 4 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::G),    // Crypto00.A
             5 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::G),    // Crypto00.B
-            6 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::R),    // Crypto00.G
+            // 6 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::R),    // Crypto00.G
             7 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::R),    // Crypto00.R
-            8 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::A),    // Crypto01.A
+            // 8 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::A),    // Crypto01.A
             9 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::A),    // Crypto01.B
-            10 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::B),   // Crypto01.G
+            // 10 => obj.set_channel(f(&channels[i]), MattePass::MATTE, RGBAChannel::B),   // Crypto01.G
             11 => obj.set_channel(f(&channels[i]), MattePass::INDEX, RGBAChannel::B),   // Crypto01.R
             _ => {},
         };
@@ -329,20 +329,21 @@ fn composite(
     let a_rear_index = Array::new(&rear.index, dim4);
     let a_upper_index = Array::new(&upper.index, dim4);
     
-    let a_front_matte = Array::new(&front.matte, dim4);
-    let a_rear_matte = Array::new(&rear.matte, dim4);
-    let a_upper_matte = Array::new(&upper.matte, dim4);
+    // let a_front_matte = Array::new(&front.matte, dim4);
+    // let a_rear_matte = Array::new(&rear.matte, dim4);
+    // let a_upper_matte = Array::new(&upper.matte, dim4);
 
-    let mut a_index = constant::<u32>(0_u32, dim4);
-    let mut a_matte = constant::<f32>(0_f32, dim4);
+    let mut a_index = tile(&Array::new(&[1u32, 0, 0, 0], dim4!(4)), dim4!(size, size));
+    // let mut a_index = constant::<u32>(0_u32, dim4);
+    // let mut a_matte = constant::<f32>(0_f32, dim4);
 
     a_index = select(&a_front_index, &m_front, &a_index);
     a_index = select(&a_rear_index, &m_rear, &a_index);
     a_index = select(&a_upper_index, &m_upper, &a_index);
 
-    a_matte = select(&a_front_matte, &m_front, &a_matte);
-    a_matte = select(&a_rear_matte, &m_rear, &a_matte);
-    a_matte = select(&a_upper_matte, &m_upper, &a_matte);
+    // a_matte = select(&a_front_matte, &m_front, &a_matte);
+    // a_matte = select(&a_rear_matte, &m_rear, &a_matte);
+    // a_matte = select(&a_upper_matte, &m_upper, &a_matte);
 
     // Map index values
     let a_index_copy = a_index.copy();
@@ -368,17 +369,17 @@ fn composite(
 
 
     // Matte
-    let mut r_1 = view!(a_matte[1:1:0, 1:1:0, 1:1:1]);
-    let mut r_2 = view!(a_matte[1:1:0, 1:1:0, 2:2:1]);
-    let mut r_3 = view!(a_matte[1:1:0, 1:1:0, 3:3:1]);
+    // let mut r_1 = view!(a_matte[1:1:0, 1:1:0, 1:1:1]);
+    // let mut r_2 = view!(a_matte[1:1:0, 1:1:0, 2:2:1]);
+    // let mut r_3 = view!(a_matte[1:1:0, 1:1:0, 3:3:1]);
 
-    r_1 = clamp(&mul(&r_1, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
-    r_2 = clamp(&mul(&r_2, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
-    r_3 = clamp(&mul(&r_3, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
+    // r_1 = clamp(&mul(&r_1, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
+    // r_2 = clamp(&mul(&r_2, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
+    // r_3 = clamp(&mul(&r_3, &(2.0_f32 * 255_f32), true), &(0_f32), &(255_f32), true);
 
-    a_matte = join_many![2; &r_1, &r_2, &r_3];
-    a_matte = reorder_v2(&a_matte, 2, 0, Some(vec![1]));
-    a_matte.cast::<u8>().host::<u8>(&mut matte);
+    // a_matte = join_many![2; &r_1, &r_2, &r_3];
+    // a_matte = reorder_v2(&a_matte, 2, 0, Some(vec![1]));
+    // a_matte.cast::<u8>().host::<u8>(&mut matte);
 
     return (index, matte);
 }
@@ -427,9 +428,9 @@ fn main() {
         }
 
         let index_folder = path_out_index.parent().unwrap();
-        let matte_folder = path_out_matte.parent().unwrap();
+        // let matte_folder = path_out_matte.parent().unwrap();
         if !index_folder.exists() { let _ = fs::create_dir_all(index_folder); }
-        if !matte_folder.exists() { let _ = fs::create_dir_all(matte_folder); }
+        // if !matte_folder.exists() { let _ = fs::create_dir_all(matte_folder); }
 
         let zmask_path = zmask_dir.join(format!("{}/{}/{}/{:0>4}", base_resolution, config, level, (121 + frame).to_string())).with_extension("webp");
 
@@ -439,7 +440,7 @@ fn main() {
 
         let zmask = image::open(zmask_path).unwrap().to_rgb8().as_bytes().to_vec();
 
-        let (index, matte) = composite(
+        let (index, _) = composite(
             &arr,
             front_exr,
             rear_exr,
@@ -449,6 +450,6 @@ fn main() {
         );
 
         save_webp(path_out_index, resolution, &index, WebpCompressionType::LOSSLESS);
-        save_webp(path_out_matte, resolution, &matte, WebpCompressionType::LOSSLESS);
+        // save_webp(path_out_matte, resolution, &matte, WebpCompressionType::LOSSLESS);
     }
 }
