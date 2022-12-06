@@ -1,11 +1,13 @@
 [workspace]
 
 members = [
+  "composite",
   "lut",
   "depth",
   "foreground",
   "matte",
   "metal",
   "test",
+  "zrank",
   "util"
 ]
